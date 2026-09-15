@@ -10,6 +10,15 @@
 
 const PL = { log: null, aberto: false, entrada: null, fimDescanso: 0, tick: null, wake: null, cronometro: 0, tela: "serie" };
 
+/* Descanso escolhido por exercicio: vale para as proximas sessoes neste celular. */
+function descansosPreferidos() { try { return JSON.parse(localStorage.getItem("treino_descanso") || "{}"); } catch { return {}; } }
+function guardarDescanso(chave, s) {
+  const d = descansosPreferidos();
+  d[chave] = s;
+  try { localStorage.setItem("treino_descanso", JSON.stringify(d)); } catch {}
+}
+function fmtSeg(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
 function catEx(chave) { return ((S.pac && S.pac.catalogo_forca) || {})[chave] || { nome: chave, inc: 2, descanso_s: 90, medida: "reps", tipo: "acessorio" }; }
 
 /* ------------------------------------------------------------------------- */
@@ -126,7 +135,7 @@ async function iniciarForca(sessao, data) {
     rir: f.rir, planejado_min: sessao.duracao_min,
     exercicios: f.exercicios.map((e) => ({
       chave: e.chave, nome: e.nome, medida: e.medida, series: e.series, reps_min: e.reps_min, reps_max: e.reps_max,
-      alvo_s: e.alvo_s, rir: e.rir, descanso_s: e.descanso_s, kg: e.kg, motivo: e.motivo, feitas: [],
+      alvo_s: e.alvo_s, rir: e.rir, descanso_s: descansosPreferidos()[e.chave] || e.descanso_s, kg: e.kg, motivo: e.motivo, feitas: [],
     })),
   };
   S.forca.push(log);
@@ -280,6 +289,10 @@ function renderPlayer() {
   }
   h += '<div class="sub" style="text-align:center">Quantas repetições ainda sobravam?</div><div class="rir">' +
     [0, 1, 2, 3, 4].map((v) => '<button class="' + (en.rir === v ? "on" : "") + '" data-rir="' + v + '">' + (v === 4 ? "4+" : v) + "</button>").join("") + "</div>";
+  const desc = Math.round(e.descanso_s || c.descanso_s || 90);
+  h += '<div class="row" style="margin:4px 0 2px"><span>Descanso entre séries</span><span class="sp"></span>' +
+    '<button class="icon" data-desc="-15" aria-label="Menos 15 segundos">−</button><b class="num" style="min-width:52px;text-align:center;font-size:20px">' + fmtSeg(desc) +
+    '</b><button class="icon" data-desc="15" aria-label="Mais 15 segundos">+</button></div>';
   h += '<div class="acoes"><button class="btn small ghost" id="pMaisSerie">+ série</button><button class="btn small ghost" id="pTrocar">Trocar exercício</button>' +
     (n > 0 ? '<button class="btn small ghost" id="pDesfazer">Desfazer última</button>' : "") + "</div>";
   corpo.innerHTML = h;
@@ -301,6 +314,14 @@ function renderPlayer() {
     else { PL.cronometro = Date.now(); PL.cronoAvisou = false; }
     renderPlayer();
   };
+  corpo.querySelectorAll("[data-desc]").forEach((b) => {
+    b.onclick = () => {
+      e.descanso_s = Math.max(15, Math.min(600, desc + Number(b.dataset.desc)));
+      guardarDescanso(e.chave, e.descanso_s);
+      idb.put("forca", log);
+      renderPlayer();
+    };
+  });
   $("#pMaisSerie").onclick = () => { e.series += 1; idb.put("forca", log); renderPlayer(); };
   $("#pTrocar").onclick = () => trocarExercicio();
   const bd = $("#pDesfazer"); if (bd) bd.onclick = () => { e.feitas.pop(); PL.entrada = null; idb.put("forca", log); renderPlayer(); };
@@ -372,7 +393,7 @@ function trocarExercicio() {
   corpo.querySelectorAll("[data-troca]").forEach((d) => {
     d.onclick = async () => {
       const k = d.dataset.troca, c = cat[k];
-      e.chave = k; e.nome = c.nome; e.medida = c.medida; e.descanso_s = c.descanso_s;
+      e.chave = k; e.nome = c.nome; e.medida = c.medida; e.descanso_s = descansosPreferidos()[k] || c.descanso_s;
       if (c.medida === "s") { e.alvo_s = 40; } else if (e.reps_min == null) { e.reps_min = 10; e.reps_max = 12; }
       const sg = GERADOR.sugerirCarga(e, historicoForca()[k], c);
       e.kg = sg.kg; e.motivo = sg.motivo; e.feitas = [];
@@ -401,7 +422,7 @@ function renderLista(corpo) {
         const k = d.dataset.novo, c = cat[k];
         const base = log.exercicios[0] || {};
         const e = { chave: k, nome: c.nome, medida: c.medida, series: 3, reps_min: c.medida === "s" ? null : base.reps_min || 8, reps_max: c.medida === "s" ? null : base.reps_max || 10,
-          alvo_s: c.medida === "s" ? 40 : null, rir: log.rir == null ? 2 : log.rir, descanso_s: c.descanso_s, feitas: [] };
+          alvo_s: c.medida === "s" ? 40 : null, rir: log.rir == null ? 2 : log.rir, descanso_s: descansosPreferidos()[k] || c.descanso_s, feitas: [] };
         const sg = GERADOR.sugerirCarga(e, historicoForca()[k], c);
         e.kg = sg.kg; e.motivo = sg.motivo;
         log.exercicios.push(e);

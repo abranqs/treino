@@ -1,6 +1,6 @@
 /* Service worker do Treino: abre sem internet (academia costuma nao ter sinal)
  * e pega versao nova quando ha. Os dados ficam no IndexedDB, nao aqui. */
-const VERSAO = "treino-1.0.0";
+const VERSAO = "treino-1.0.1";
 const ARQUIVOS = ["./", "./index.html", "./app.js", "./forca.js", "./gerador.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

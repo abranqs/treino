@@ -288,7 +288,7 @@
         reps_max: c.medida === "s" ? null : (c.tipo === "core" ? Math.max(modelo.reps_max, 12) : modelo.reps_max),
         alvo_s: c.medida === "s" ? 40 : null,
         rir: modelo.rir == null ? 2 : modelo.rir,
-        descanso_s: modelo.descanso_s && composto ? modelo.descanso_s : c.descanso_s,
+        descanso_s: (ctx.descansos && ctx.descansos[k]) || (modelo.descanso_s && composto ? modelo.descanso_s : c.descanso_s),
         carga, percentual: modelo.percentual,
       };
     };

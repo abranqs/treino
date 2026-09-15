@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.0.0";
+const VERSAO = "1.0.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -242,7 +242,8 @@ function historicoForca() {
 
 function ctxGerador(data) {
   const p = S.pac || {};
-  return { catalogo: p.catalogo_forca || {}, historico: historicoForca(), prescricao: data === (p.hoje || "") ? p.prescricao : null };
+  return { catalogo: p.catalogo_forca || {}, historico: historicoForca(), prescricao: data === (p.hoje || "") ? p.prescricao : null,
+    descansos: typeof descansosPreferidos === "function" ? descansosPreferidos() : {} };
 }
 
 function modelosDe(mod, sessao) {
