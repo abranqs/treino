@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.1.0";
+const VERSAO = "1.1.2";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

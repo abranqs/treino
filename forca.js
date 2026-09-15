@@ -19,6 +19,56 @@ function guardarDescanso(chave, s) {
 }
 function fmtSeg(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
 
+/* Teclado proprio para carga e repeticoes. O teclado do Android com campo
+ * numerico juntava o digito ao valor que ja estava ("0" virava "060"), nao
+ * aceitava virgula e fechava quando o modo automatico redesenhava a tela. */
+function teclado(titulo, valor, opcoes, aoConfirmar) {
+  const decimal = !!opcoes.decimal;
+  let txt = String(valor == null ? "" : valor).replace(".", ",");
+  let novo = true;                       // o primeiro digito substitui o valor
+  const mostrar = () => { $("#tqValor").textContent = txt === "" ? "0" : txt; };
+  const numero = () => Math.max(0, Number(txt.replace(",", ".")) || 0);
+  $("#tqTitulo").textContent = titulo;
+  $("#tqUnid").textContent = opcoes.unidade || "";
+  $("#tqAtalhos").innerHTML = (opcoes.atalhos || []).map((d) => '<button class="chip" data-tqd="' + d + '">' + (d > 0 ? "+" : "−") + String(Math.abs(d)).replace(".", ",") + "</button>").join("");
+  $("#tqGrade").innerHTML = ["1", "2", "3", "4", "5", "6", "7", "8", "9", decimal ? "," : "", "0", "⌫"]
+    .map((k) => k ? '<button data-tq="' + k + '">' + k + "</button>" : "<span></span>").join("");
+  $("#tqGrade").querySelectorAll("[data-tq]").forEach((b) => {
+    b.onclick = () => {
+      const k = b.dataset.tq;
+      if (k === "⌫") { txt = novo ? "" : txt.slice(0, -1); novo = false; }
+      else if (k === ",") { if (novo) { txt = "0,"; novo = false; } else if (!txt.includes(",")) txt = (txt || "0") + ","; }
+      else { if (novo) { txt = ""; novo = false; } if (txt.replace(",", "").length < 5) txt = (txt === "0" ? "" : txt) + k; }
+      mostrar();
+    };
+  });
+  $("#tqAtalhos").querySelectorAll("[data-tqd]").forEach((b) => {
+    b.onclick = () => {
+      const v = Math.round((numero() + Number(b.dataset.tqd)) * 100) / 100;
+      txt = String(Math.max(0, v)).replace(".", ",");
+      novo = true;
+      mostrar();
+    };
+  });
+  const fechar = () => $("#teclado").classList.remove("on");
+  $("#tqFechar").onclick = fechar;
+  $("#teclado").onclick = (ev) => { if (ev.target.id === "teclado") fechar(); };
+  $("#tqOk").onclick = () => { fechar(); aoConfirmar(decimal ? numero() : Math.round(numero())); };
+  mostrar();
+  $("#teclado").classList.add("on");
+}
+
+function ligarTeclados(corpo, e, en) {
+  const c = catEx(e.chave);
+  const inc = c.inc || 2.5;
+  const bk = $("#inKg", corpo);
+  if (bk) bk.onclick = () => teclado("Carga · " + e.nome, en.kg, { decimal: true, unidade: "kg", atalhos: [-2 * inc, -inc, inc, 2 * inc] },
+    (v) => { en.kg = v; renderPlayer(); });
+  const br = $("#inReps", corpo);
+  if (br) br.onclick = () => teclado("Repetições · " + e.nome, en.reps, { unidade: "reps", atalhos: [-2, -1, 1, 2] },
+    (v) => { en.reps = v; renderPlayer(); });
+}
+
 function catEx(chave) { return ((S.pac && S.pac.catalogo_forca) || {})[chave] || { nome: chave, inc: 2, descanso_s: 90, medida: "reps", tipo: "acessorio" }; }
 
 /* ------------------------------------------------------------------------- */
@@ -128,8 +178,31 @@ async function comecarForcaDaSessao(data, id) {
   await iniciarForca({ id: /^\d+$/.test(String(s.id)) ? Number(s.id) : null, titulo: s.titulo, detalhe: det, duracao_min: s.duracao_min }, data);
 }
 
+/* Troca feita no player vale para as proximas sessoes neste celular. */
+function substitutosLocais() { try { return JSON.parse(localStorage.getItem("treino_substitutos") || "{}"); } catch { return {}; } }
+function guardarSubstituto(de, para) {
+  const d = substitutosLocais();
+  d[de] = para;
+  delete d[para];
+  try { localStorage.setItem("treino_substitutos", JSON.stringify(d)); } catch {}
+}
+
 async function iniciarForca(sessao, data) {
-  const f = sessao.detalhe.forca;
+  const f = JSON.parse(JSON.stringify(sessao.detalhe.forca));
+  const subs = substitutosLocais(), cat = (S.pac && S.pac.catalogo_forca) || {}, hist = historicoForca();
+  const usados = new Set();
+  f.exercicios = f.exercicios.filter((e) => {
+    const k = subs[e.chave] && cat[subs[e.chave]] ? subs[e.chave] : e.chave;
+    if (!cat[k] || usados.has(k)) return false;
+    usados.add(k);
+    if (k !== e.chave) {
+      const c = cat[k];
+      Object.assign(e, { chave: k, nome: c.nome, medida: c.medida, descanso_s: c.descanso_s });
+      const sg = GERADOR.sugerirCarga(e, hist[k], c);
+      e.kg = sg.kg; e.motivo = sg.motivo;
+    }
+    return true;
+  });
   const log = {
     id: uid(), status: "andamento", data, sessao_id: sessao.id, titulo: sessao.titulo, inicio: agoraIso(), atual: 0,
     rir: f.rir, planejado_min: sessao.duracao_min,
@@ -278,8 +351,8 @@ function renderPlayer() {
   }
   h += "</table>";
   if (!c.corporal || en.kg) {
-    h += '<div class="stepper"><button class="icon" data-kg="-1">−</button><div class="val"><input class="grande num" type="number" inputmode="decimal" step="0.5" min="0" id="inKg" value="' + en.kg +
-      '"><span>kg · passo ' + String(c.inc || 1).replace(".", ",") + '</span></div><button class="icon" data-kg="1">+</button></div>';
+    h += '<div class="stepper"><button class="icon" data-kg="-1">−</button><div class="val"><button class="valbtn" id="inKg">' + String(en.kg).replace(".", ",") +
+      '</button><span>kg · passo ' + String(c.inc || 1).replace(".", ",") + '</span></div><button class="icon" data-kg="1">+</button></div>';
   } else {
     h += '<div class="sub" style="text-align:center">Peso do corpo · <button class="btn small ghost" data-kg="1">+ carga</button></div>';
   }
@@ -287,7 +360,7 @@ function renderPlayer() {
     h += '<div class="stepper"><button class="icon" data-s="-5">−</button><div class="val"><b class="num">' + en.s + '</b><span>segundos</span></div><button class="icon" data-s="5">+</button></div>' +
       '<div style="text-align:center;margin:6px 0"><button class="btn" id="pCronoBtn">' + (PL.cronometro ? 'Parar <span id="pCrono" class="num"></span>' : "▶ Cronometrar") + "</button></div>";
   } else {
-    h += '<div class="stepper"><button class="icon" data-reps="-1">−</button><div class="val"><input class="grande num" type="number" inputmode="numeric" min="0" id="inReps" value="' + en.reps + '"><span>repetições</span></div><button class="icon" data-reps="1">+</button></div>';
+    h += '<div class="stepper"><button class="icon" data-reps="-1">−</button><div class="val"><button class="valbtn" id="inReps">' + en.reps + '</button><span>repetições</span></div><button class="icon" data-reps="1">+</button></div>';
   }
   h += '<div class="sub" style="text-align:center">Quantas repetições ainda sobravam?</div><div class="rir">' +
     [0, 1, 2, 3, 4].map((v) => '<button class="' + (en.rir === v ? "on" : "") + '" data-rir="' + v + '">' + (v === 4 ? "4+" : v) + "</button>").join("") + "</div>";
@@ -308,8 +381,7 @@ function renderPlayer() {
   corpo.querySelectorAll("[data-reps]").forEach((b) => { b.onclick = () => { en.reps = Math.max(0, en.reps + Number(b.dataset.reps)); renderPlayer(); }; });
   corpo.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => { en.s = Math.max(5, en.s + Number(b.dataset.s)); renderPlayer(); }; });
   corpo.querySelectorAll("[data-rir]").forEach((b) => { b.onclick = () => { en.rir = Number(b.dataset.rir); renderPlayer(); }; });
-  const ik = $("#inKg"); if (ik) ik.onchange = () => { en.kg = Math.max(0, Number(String(ik.value).replace(",", ".")) || 0); renderPlayer(); };
-  const ir = $("#inReps"); if (ir) ir.onchange = () => { en.reps = Math.max(0, Math.round(Number(ir.value) || 0)); renderPlayer(); };
+  ligarTeclados(corpo, e, en);
   const cb = $("#pCronoBtn");
   if (cb) cb.onclick = () => {
     if (PL.cronometro) { en.s = Math.floor((Date.now() - PL.cronometro) / 1000); PL.cronometro = 0; }
@@ -396,6 +468,7 @@ function trocarExercicio() {
   corpo.querySelectorAll("[data-troca]").forEach((d) => {
     d.onclick = async () => {
       const k = d.dataset.troca, c = cat[k];
+      guardarSubstituto(e.chave, k);
       e.chave = k; e.nome = c.nome; e.medida = c.medida; e.descanso_s = descansosPreferidos()[k] || c.descanso_s;
       if (c.medida === "s") { e.alvo_s = 40; } else if (e.reps_min == null) { e.reps_min = 10; e.reps_max = 12; }
       const sg = GERADOR.sugerirCarga(e, historicoForca()[k], c);

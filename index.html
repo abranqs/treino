@@ -161,6 +161,14 @@
   #descanso .relogio{font-size:96px;font-weight:800;line-height:1}
   #descanso .prox{color:var(--mute);text-align:center;font-size:16px;line-height:1.4}
 
+  #teclado{position:fixed;inset:0;z-index:50;background:#0008;display:none;align-items:flex-end;justify-content:center}
+  #teclado.on{display:flex}
+  #teclado .tq{background:var(--bg);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:14px 16px calc(14px + env(safe-area-inset-bottom))}
+  .tqvisor{text-align:center;font-size:56px;font-weight:800;margin:6px 0 8px}
+  .tqvisor small{font-size:18px;color:var(--mute)}
+  .tqgrade{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+  .tqgrade button{height:60px;border:0;border-radius:14px;background:var(--card2);font-size:26px;font-weight:700;cursor:pointer}
+  .valbtn{border:0;background:transparent;color:var(--txt);font-size:44px;font-weight:800;line-height:1;cursor:pointer;border-bottom:2px dashed var(--line);padding:0 6px;font-variant-numeric:tabular-nums}
   #toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 16px;
     border-radius:12px;font-weight:600;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:92vw;text-align:center;z-index:60}
   #toast.on{opacity:1}
@@ -208,6 +216,16 @@
     <button class="btn" id="dMenos">−15 s</button>
     <button class="btn" id="dMais">+30 s</button>
     <button class="btn main" id="dPular">Pular</button>
+  </div>
+</section>
+
+<section id="teclado" aria-modal="true" role="dialog">
+  <div class="tq">
+    <div class="row"><b id="tqTitulo"></b><span class="sp"></span><button class="icon" id="tqFechar" aria-label="Cancelar">✕</button></div>
+    <div class="tqvisor num"><span id="tqValor">0</span> <small id="tqUnid"></small></div>
+    <div class="chips" id="tqAtalhos" style="justify-content:center"></div>
+    <div class="tqgrade" id="tqGrade"></div>
+    <button class="btn main" id="tqOk" style="width:100%;min-height:58px;font-size:19px;margin-top:8px">OK</button>
   </div>
 </section>
 

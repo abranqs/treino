@@ -193,11 +193,11 @@ function renderAuto(corpo) {
 
   // o que vai ser registrado
   h += '<div class="lbl">Vai registrar</div><div class="row" style="gap:6px">' +
-    '<button class="icon" data-kg="-1">−</button><div style="flex:1;text-align:center"><input class="grande num" style="font-size:34px;width:100%;text-align:center;background:transparent;border:0;border-bottom:2px dashed var(--line);color:var(--txt)" type="number" inputmode="decimal" step="0.5" id="inKg" value="' + en.kg + '"><div class="sub">kg</div></div>' +
+    '<button class="icon" data-kg="-1">−</button><div style="flex:1;text-align:center"><button class="valbtn" style="font-size:36px" id="inKg">' + String(en.kg).replace(".", ",") + '</button><div class="sub">kg</div></div>' +
     '<button class="icon" data-kg="1">+</button><span style="width:10px"></span>' +
     (e.medida === "s"
       ? '<button class="icon" data-s="-5">−</button><div style="flex:1;text-align:center"><b class="num" style="font-size:34px">' + en.s + '</b><div class="sub">seg</div></div><button class="icon" data-s="5">+</button>'
-      : '<button class="icon" data-reps="-1">−</button><div style="flex:1;text-align:center"><input class="grande num" style="font-size:34px;width:100%;text-align:center;background:transparent;border:0;border-bottom:2px dashed var(--line);color:var(--txt)" type="number" inputmode="numeric" id="inReps" value="' + en.reps + '"><div class="sub">reps</div></div><button class="icon" data-reps="1">+</button>') +
+      : '<button class="icon" data-reps="-1">−</button><div style="flex:1;text-align:center"><button class="valbtn" style="font-size:36px" id="inReps">' + en.reps + '</button><div class="sub">reps</div></div><button class="icon" data-reps="1">+</button>') +
     "</div>";
 
   if (n) {
@@ -225,8 +225,7 @@ function renderAuto(corpo) {
   corpo.querySelectorAll("[data-kg]").forEach((b) => { b.onclick = () => { en.kg = Math.max(0, Math.round((en.kg + Number(b.dataset.kg) * inc) * 100) / 100); renderPlayer(); }; });
   corpo.querySelectorAll("[data-reps]").forEach((b) => { b.onclick = () => { en.reps = Math.max(0, en.reps + Number(b.dataset.reps)); renderPlayer(); }; });
   corpo.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => { en.s = Math.max(5, en.s + Number(b.dataset.s)); renderPlayer(); }; });
-  const ik = $("#inKg"); if (ik) ik.onchange = () => { en.kg = Math.max(0, Number(String(ik.value).replace(",", ".")) || 0); renderPlayer(); };
-  const ir = $("#inReps"); if (ir) ir.onchange = () => { en.reps = Math.max(0, Math.round(Number(ir.value) || 0)); renderPlayer(); };
+  ligarTeclados(corpo, e, en);
   const mudarCiclo = (v) => { e.ciclo_s = Math.max(20, Math.min(600, v)); guardarCiclo(e.chave, e.ciclo_s); idb.put("forca", log); renderPlayer(); };
   corpo.querySelectorAll("[data-ciclo]").forEach((b) => { b.onclick = () => mudarCiclo(ciclo + Number(b.dataset.ciclo)); });
   corpo.querySelectorAll("[data-cicloset]").forEach((b) => { b.onclick = () => mudarCiclo(Number(b.dataset.cicloset)); });
