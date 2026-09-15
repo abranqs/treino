@@ -235,6 +235,9 @@
       const kg = arredCarga(topo * (ex.percentual || 60) / 100, inc);
       return { kg, motivo: (ex.percentual || 60) + "% da última carga (" + topo + " kg): ativação, sem fadiga." };
     }
+    if (ult.series.every((s) => s[3])) {
+      return { kg: topo, motivo: "Última vez registrada no automático sem dizer como foi: repete " + topo + " kg." };
+    }
     if (ex.carga === "manter") return { kg: topo, motivo: "Mesma carga da última vez (" + ult.data.slice(8, 10) + "/" + ult.data.slice(5, 7) + "): o plano pede para não subir." };
     const aPrev = ult.alvo || {};
     if (aPrev.reps_max && Math.abs(aPrev.reps_max - ex.reps_max) >= 2) {

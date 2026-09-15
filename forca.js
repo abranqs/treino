@@ -169,8 +169,8 @@ function abrirPlayer(log) {
   PL.tick = setInterval(tickPlayer, 500);
   $("#pSair").onclick = () => fecharPlayer();
   $("#pLista").onclick = () => { PL.tela = PL.tela === "lista" ? "serie" : "lista"; renderPlayer(); };
-  $("#pAnt").onclick = () => irPara(PL.log.atual - 1);
-  $("#pProx").onclick = () => irPara(PL.log.atual + 1);
+  $("#pAnt").onclick = () => (modoAuto() ? autoIrPara(PL.log.atual - 1) : irPara(PL.log.atual - 1));
+  $("#pProx").onclick = () => (modoAuto() ? autoIrPara(PL.log.atual + 1) : irPara(PL.log.atual + 1));
   $("#pFeita").onclick = serieFeita;
   $("#dPular").onclick = () => fimDescanso(true);
   $("#dMais").onclick = () => { PL.fimDescanso += 30000; tickPlayer(); };
@@ -221,6 +221,7 @@ function tickPlayer() {
   if (!PL.log) return;
   const seg = Math.floor((Date.now() - new Date(PL.log.inicio).getTime()) / 1000);
   $("#pTempo").textContent = Math.floor(seg / 60) + ":" + String(seg % 60).padStart(2, "0") + " de treino";
+  if (typeof modoAuto === "function" && modoAuto()) { tickAuto(); return; }
   if ($("#descanso").classList.contains("on")) {
     const r = Math.ceil((PL.fimDescanso - Date.now()) / 1000);
     $("#dTempo").textContent = r <= 0 ? "Bora!" : Math.floor(r / 60) + ":" + String(r % 60).padStart(2, "0");
@@ -258,6 +259,7 @@ function renderPlayer() {
   const corpo = $("#pCorpo");
   if (PL.tela === "lista") { renderLista(corpo); return; }
   if (PL.tela === "fim") { renderFim(corpo); return; }
+  if (typeof modoAuto === "function" && modoAuto()) { renderAuto(corpo); return; }
   const e = exAtual();
   const c = catEx(e.chave);
   if (!PL.entrada) PL.entrada = entradaPadrao(e);
@@ -293,7 +295,7 @@ function renderPlayer() {
   h += '<div class="row" style="margin:4px 0 2px"><span>Descanso entre séries</span><span class="sp"></span>' +
     '<button class="icon" data-desc="-15" aria-label="Menos 15 segundos">−</button><b class="num" style="min-width:52px;text-align:center;font-size:20px">' + fmtSeg(desc) +
     '</b><button class="icon" data-desc="15" aria-label="Mais 15 segundos">+</button></div>';
-  h += '<div class="acoes"><button class="btn small ghost" id="pMaisSerie">+ série</button><button class="btn small ghost" id="pTrocar">Trocar exercício</button>' +
+  h += '<div class="acoes"><button class="btn small ghost" id="pAuto">Modo automático (tempo fixo)</button><button class="btn small ghost" id="pMaisSerie">+ série</button><button class="btn small ghost" id="pTrocar">Trocar exercício</button>' +
     (n > 0 ? '<button class="btn small ghost" id="pDesfazer">Desfazer última</button>' : "") + "</div>";
   corpo.innerHTML = h;
   $("#pFeita").onclick = serieFeita;
@@ -323,6 +325,7 @@ function renderPlayer() {
     };
   });
   $("#pMaisSerie").onclick = () => { e.series += 1; idb.put("forca", log); renderPlayer(); };
+  $("#pAuto").onclick = () => definirModo(true);
   $("#pTrocar").onclick = () => trocarExercicio();
   const bd = $("#pDesfazer"); if (bd) bd.onclick = () => { e.feitas.pop(); PL.entrada = null; idb.put("forca", log); renderPlayer(); };
 }
@@ -452,12 +455,40 @@ function renderFim(corpo) {
     '</b></div><div><span>Volume</span><b class="num">' + Math.round(volume).toLocaleString("pt-BR") + " kg</b></div></div>" +
     (recordes.length ? '<h2>Recordes</h2><div class="card">' + recordes.map((r) => "<div>🏆 " + esc(r) + "</div>").join("") + "</div>" : "") +
     (faltam.length ? '<div class="aviso">Ficou por fazer: ' + faltam.map((e) => esc(e.nome) + " (" + e.feitas.length + "/" + e.series + ")").join(", ") + "</div>" : "") +
+    htmlSensacao(feitas) +
     '<div class="acoes" style="margin-top:16px"><button class="btn" id="pVoltarTreino">Voltar ao treino</button><button class="btn ok" id="pSalvar">Salvar treino</button></div>' +
     '<p class="sub">As séries vão para o computador e passam a definir as cargas das próximas sessões. Grave a atividade no relógio como Treino de força para a FC e as calorias.</p>';
   $("#pFeita").textContent = "Salvar treino";
-  $("#pVoltarTreino").onclick = () => { PL.tela = "serie"; renderPlayer(); };
+  $("#pVoltarTreino").onclick = () => { PL.tela = "serie"; if (log.auto && !log.auto.pausadoEm) log.auto.pausadoEm = Date.now(); renderPlayer(); };
   $("#pSalvar").onclick = salvarForca;
+  corpo.querySelectorAll("[data-sens]").forEach((b) => {
+    b.onclick = () => {
+      const e = log.exercicios[Number(b.dataset.ex)];
+      e.sensacao = b.dataset.sens;
+      for (const f of e.feitas) {
+        if (!f.auto && f.sensacao == null) continue;
+        f.rir = e.sensacao === "facil" ? (e.rir || 2) + 2 : e.sensacao === "pesado" ? 0 : e.rir;
+        f.auto = false;
+        f.sensacao = e.sensacao;
+      }
+      idb.put("forca", log);
+      renderPlayer();
+    };
+  });
   $("#pFeita").onclick = salvarForca;
+}
+
+/* Series registradas pelo modo automatico carregam a carga e as repeticoes
+ * planejadas. Sem confirmacao, a proxima carga so repete; um toque por
+ * exercicio diz se foi facil (sobe), na medida ou pesado. */
+function htmlSensacao(feitas) {
+  const lista = feitas.map((e, i) => [e, PL.log.exercicios.indexOf(e)]).filter(([e]) => e.feitas.some((f) => f.auto || f.sensacao));
+  if (!lista.length) return "";
+  return '<h2>Como foi cada exercício?</h2><div class="card">' + lista.map(([e, i]) =>
+    '<div style="padding:8px 0;border-top:1px solid var(--line)"><b>' + esc(e.nome) + '</b> <span class="sub">' + (e.feitas[0].kg || 0) + " kg</span>" +
+    '<div class="chips" style="margin-top:6px">' + [["facil", "Fácil (subir)"], ["medida", "Na medida"], ["pesado", "Pesado"]].map(([k, t]) =>
+      '<button class="chip ' + (e.sensacao === k ? "on" : "") + '" data-ex="' + i + '" data-sens="' + k + '">' + t + "</button>").join("") + "</div></div>").join("") +
+    '<div class="sub" style="margin-top:6px">Sem resposta, a próxima sessão repete a carga.</div></div>';
 }
 
 async function salvarForca() {
@@ -479,7 +510,7 @@ async function salvarForca() {
     tipo: "forca", id: log.id, data: log.data, sessao_id: log.sessao_id, titulo: log.titulo, inicio: log.inicio, fim: log.fim, duracao_min: log.duracao_min,
     exercicios: feitas.map((e) => ({
       chave: e.chave, nome: e.nome, alvo: { reps_min: e.reps_min, reps_max: e.reps_max, rir: e.rir },
-      series: e.feitas.map((f) => ({ kg: f.kg, reps: f.reps, s: f.s, rir: f.rir, t: f.t })),
+      series: e.feitas.map((f) => ({ kg: f.kg, reps: f.reps, s: f.s, rir: f.rir, t: f.t, auto: f.auto ? 1 : 0 })),
     })),
   };
   await enfileirar("treino-app forca " + log.data, corpo);

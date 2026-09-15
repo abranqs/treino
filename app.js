@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.0.1";
+const VERSAO = "1.1.0";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -232,7 +232,7 @@ function historicoForca() {
       if (!e.feitas || !e.feitas.length) continue;
       (h[e.chave] = h[e.chave] || []).push({
         data: f.data, alvo: { reps_min: e.reps_min, reps_max: e.reps_max, rir: e.rir },
-        series: e.feitas.map((s) => [s.kg, s.reps != null ? s.reps : s.s, s.rir]),
+        series: e.feitas.map((s) => [s.kg, s.reps != null ? s.reps : s.s, s.rir, s.auto ? 1 : 0]),
       });
     }
   }

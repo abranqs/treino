@@ -1,7 +1,7 @@
 /* Service worker do Treino: abre sem internet (academia costuma nao ter sinal)
  * e pega versao nova quando ha. Os dados ficam no IndexedDB, nao aqui. */
-const VERSAO = "treino-1.0.1";
-const ARQUIVOS = ["./", "./index.html", "./app.js", "./forca.js", "./gerador.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
+const VERSAO = "treino-1.1.0";
+const ARQUIVOS = ["./", "./index.html", "./app.js", "./forca.js", "./forca_auto.js", "./gerador.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSAO).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
