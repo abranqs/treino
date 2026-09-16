@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.1.3";
+const VERSAO = "1.1.4";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -350,7 +350,9 @@ function htmlProntidao(p) {
     '<div class="regra" style="margin-top:6px">' + esc(ps.resumo || "") + "</div></div></div>";
   const hrv = ps.hrv || {};
   h += '<div class="mini"><div><span>Sono</span><b class="num">' + (p.sono && p.sono.duracao_min ? fmtMin(p.sono.duracao_min) : "—") + "</b></div>" +
-    '<div><span>RMSSD</span><b class="num">' + (hrv.rmssd ? Math.round(hrv.rmssd) : "—") + '</b><small class="sub"> ' + (hrv.baseline ? "base " + Math.round(hrv.baseline) : "") + "</small></div>" +
+    (hrv.rmssd
+      ? '<div><span>RMSSD teste</span><b class="num">' + Math.round(hrv.rmssd) + '</b><small class="sub"> ' + (hrv.baseline ? "base " + Math.round(hrv.baseline) : "") + "</small></div>"
+      : '<div><span>VFC do sono</span><b class="num">' + (p.noite && p.noite.rmssd ? Math.round(p.noite.rmssd) : "—") + '</b><small class="sub"> ms</small></div>') +
     '<div><span>ACWR</span><b class="num">' + (ps.acwr != null ? String(ps.acwr).replace(".", ",") : "—") + "</b></div></div></div>";
   return h;
 }
