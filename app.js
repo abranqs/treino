@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.1.2";
+const VERSAO = "1.1.3";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -173,7 +173,10 @@ async function enviarFila() {
         });
         if (r.status === 201) ok = true;
         else if ([401, 403, 404].includes(r.status)) {
-          S.erroFila = "O token não pode criar issues no ciclo-dados. Em Mais → Conexão tem o passo a passo (Issues: leitura e escrita).";
+          let msg = "";
+          try { msg = (await r.json()).message || ""; } catch {}
+          S.erroFila = "O token não pode criar issues no ciclo-dados (GitHub " + r.status + (msg ? ": " + msg : "") +
+            "). Confira no GitHub se a permissão Issues: Read and write foi salva no MESMO token que está neste celular.";
           break;
         } else {
           S.erroFila = "GitHub respondeu " + r.status + " — tento de novo depois.";
@@ -303,7 +306,7 @@ function quandoRecebido() {
 
 function avisosGerais() {
   let h = "";
-  if (S.erroFila) h += '<div class="aviso veto">' + esc(S.erroFila) + "</div>";
+  if (S.erroFila) h += '<div class="aviso veto">' + esc(S.erroFila) + '<div class="acoes"><button class="btn small" id="tentarFila">Tentar enviar de novo</button></div></div>';
   if (S.erroSync) h += '<div class="aviso">Última atualização falhou: ' + esc(S.erroSync) + "</div>";
   if (S.pac && S.pac.hoje !== hojeLocal()) {
     h += '<div class="aviso">Os dados são de ' + esc(nomeDia(S.pac.hoje)) + ": o computador ainda não publicou hoje. Prontidão e noite ficam para quando ele ligar; o plano do dia já está aqui.</div>";
@@ -381,7 +384,7 @@ function htmlSemanaResumo(sem) {
 function statusSessao(s) {
   if (s.local) {
     if (s.local.enviada_em) return '<span class="badge info">enviada · o computador manda ao relógio</span>';
-    return '<span class="badge warn">na fila do celular</span>';
+    return '<span class="badge warn">na fila do celular</span> <button class="btn small ghost" data-desfazer="' + esc(s.local.id) + '">Desfazer alteração</button>';
   }
   if (s.status === "feito") return '<span class="badge ok">feito ✓</span>';
   if (s.status === "perdido") return '<span class="badge bad">perdido</span>';
@@ -494,6 +497,16 @@ function ligarConexao() {
 
 function ligarTela() {
   const bs = $("#btnSync"); if (bs) bs.onclick = () => buscar(false);
+  const tf = $("#tentarFila"); if (tf) tf.onclick = () => { S.erroFila = null; enviarFila(); };
+  document.querySelectorAll("[data-desfazer]").forEach((b) => {
+    b.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Desfazer a alteração? O treino volta ao que está no plano.")) return;
+      await removerLocal(b.dataset.desfazer);
+      toast("Alteração desfeita");
+      render();
+    };
+  });
   document.querySelectorAll("[data-alterar]").forEach((b) => { b.onclick = () => abrirAlterar(b.dataset.dia, b.dataset.alterar); });
   document.querySelectorAll("[data-add]").forEach((b) => { b.onclick = () => abrirAlterar(b.dataset.add, null); });
   document.querySelectorAll("[data-comecar]").forEach((b) => { b.onclick = () => comecarForcaDaSessao(b.dataset.dia, b.dataset.comecar); });
@@ -728,7 +741,8 @@ async function iniciar() {
   window.addEventListener("popstate", () => { fecharFolha(true); if (typeof fecharPlayerPeloVoltar === "function") fecharPlayerPeloVoltar(); });
   window.addEventListener("online", () => { enviarFila(); buscar(true); });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && Date.now() - S.recebido > 5 * 60000) buscar(true);
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - S.recebido > 5 * 60000) buscar(true); else enviarFila();
   });
   render();
   buscar(true);
