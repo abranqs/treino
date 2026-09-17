@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const VERSAO = "1.1.4";
+const VERSAO = "1.1.5";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -155,9 +155,39 @@ async function enfileirar(titulo, corpo) {
   enviarFila();
 }
 
-async function enviarFila() {
-  if (enviarFila.rodando || !S.fila.length) return;
-  if (!DEMO && (!CFG.token || !navigator.onLine)) return;
+/* Troca de um dia que ja passou nao serve para mais nada: aplicada agora,
+ * reescreveria uma sessao ja feita. Sai da fila sozinha. Treino de forca
+ * registrado nunca sai: e historico e precisa chegar ao computador. */
+async function limparFilaVencida() {
+  const hoje = hojeLocal();
+  for (const f of S.fila.slice()) {
+    const d = (f.corpo && f.corpo.data) || "";
+    if (/^treino-app troca /.test(f.titulo) && d && d < hoje) {
+      S.fila = S.fila.filter((x) => x.id !== f.id);
+      await idb.del("fila", f.id);
+      S.trocas = S.trocas.filter((x) => x.id !== f.id);
+      await idb.del("trocas", f.id);
+    }
+  }
+  if (!S.fila.length) S.erroFila = null;
+}
+
+async function descartarFila() {
+  for (const f of S.fila.slice()) {
+    await idb.del("fila", f.id);
+    if (/^treino-app troca /.test(f.titulo)) { S.trocas = S.trocas.filter((x) => x.id !== f.id); await idb.del("trocas", f.id); }
+  }
+  S.fila = S.fila.filter((f) => !/^treino-app troca /.test(f.titulo));
+  if (!S.fila.length) S.erroFila = null;
+  render();
+}
+
+async function enviarFila(manual) {
+  await limparFilaVencida();
+  if (enviarFila.rodando || !S.fila.length) { if (manual) { toast("Nada para enviar."); render(); } return; }
+  if (!DEMO && !CFG.token) { if (manual) toast("Sem token neste celular — cole em Conexão.", 4000); return; }
+  if (!DEMO && !navigator.onLine) { if (manual) toast("Sem internet agora.", 3000); return; }
+  if (manual) toast("Enviando…");
   enviarFila.rodando = true;
   try {
     for (const item of S.fila.slice().sort((a, b) => a.criado_em.localeCompare(b.criado_em))) {
@@ -197,6 +227,7 @@ async function enviarFila() {
     S.erroFila = "Sem conexão com o GitHub — o que está na fila sai quando voltar.";
   } finally {
     enviarFila.rodando = false;
+    if (manual) toast(S.erroFila ? S.erroFila : "Enviado.", S.erroFila ? 6000 : 2500);
     render();
   }
 }
@@ -306,7 +337,7 @@ function quandoRecebido() {
 
 function avisosGerais() {
   let h = "";
-  if (S.erroFila) h += '<div class="aviso veto">' + esc(S.erroFila) + '<div class="acoes"><button class="btn small" id="tentarFila">Tentar enviar de novo</button></div></div>';
+  if (S.erroFila && S.fila.length) h += '<div class="aviso veto">' + esc(S.erroFila) + '<div class="acoes"><button class="btn small" id="tentarFila">Tentar enviar de novo</button> <button class="btn small ghost" id="descartarFila">Descartar alterações</button></div></div>';
   if (S.erroSync) h += '<div class="aviso">Última atualização falhou: ' + esc(S.erroSync) + "</div>";
   if (S.pac && S.pac.hoje !== hojeLocal()) {
     h += '<div class="aviso">Os dados são de ' + esc(nomeDia(S.pac.hoje)) + ": o computador ainda não publicou hoje. Prontidão e noite ficam para quando ele ligar; o plano do dia já está aqui.</div>";
@@ -461,15 +492,16 @@ function renderMais() {
   html += "<h2>Fila de envio</h2><div class=\"card\">";
   if (!S.fila.length) html += '<div class="sub">Nada esperando. Tudo o que você alterou já saiu do celular.</div>';
   S.fila.forEach((f) => { html += '<div class="row" style="padding:6px 0"><span>' + esc(f.titulo) + '</span><span class="sp"></span><span class="sub">' + esc(new Date(f.criado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })) + "</span></div>"; });
-  if (S.fila.length) html += '<button class="btn main" style="width:100%;margin-top:8px" id="enviarAgora">Enviar agora</button>';
+  if (S.fila.length) html += '<button class="btn main" style="width:100%;margin-top:8px" id="enviarAgora">Enviar agora</button>' +
+    (S.erroFila ? '<div class="sub" style="margin-top:8px">' + esc(S.erroFila) + "</div>" : "");
   html += "</div>";
-  html += '<h2>Como funciona</h2><div class="card md"><p>O computador publica o plano, a prontidão e a biblioteca de treinos. Aqui você altera tempo, modalidade e tipo: o treino se remonta na hora, com seus alvos (FC de Karvonen, paces, CSS da natação) e o histórico de cargas.</p>' +
+  html += '<h2>Como funciona</h2><div class="card md"><p>O computador publica o plano, a prontidão e a biblioteca de treinos. Aqui você altera tempo, modalidade e tipo: o treino se remonta na hora, com seus alvos (FC pelas suas zonas de limiar, paces, CSS da natação) e o histórico de cargas.</p>' +
     "<p>O que você salva vai para o computador, que grava no plano e manda ao relógio em até 5 minutos, desde que ele esteja ligado. No relógio, sincronize com o Garmin Connect para o treino aparecer.</p>" +
     '<p>Bike e brick: o treino também aparece no <a href="../ciclo/" style="color:var(--acc)">Ciclo</a>.</p></div>';
   $("#tela").innerHTML = html;
   ligarTela();
   ligarConexao();
-  const b = $("#enviarAgora"); if (b) b.onclick = () => enviarFila();
+  const b = $("#enviarAgora"); if (b) b.onclick = () => enviarFila(true);
 }
 
 function htmlConexao() {
@@ -499,7 +531,8 @@ function ligarConexao() {
 
 function ligarTela() {
   const bs = $("#btnSync"); if (bs) bs.onclick = () => buscar(false);
-  const tf = $("#tentarFila"); if (tf) tf.onclick = () => { S.erroFila = null; enviarFila(); };
+  const tf = $("#tentarFila"); if (tf) tf.onclick = () => { S.erroFila = null; enviarFila(true); };
+  const df = $("#descartarFila"); if (df) df.onclick = () => { if (confirm("Descartar as alterações que ainda não saíram do celular? Treinos de força registrados continuam na fila.")) descartarFila(); };
   document.querySelectorAll("[data-desfazer]").forEach((b) => {
     b.onclick = async (ev) => {
       ev.stopPropagation();
