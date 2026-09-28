@@ -669,7 +669,13 @@ function ligarAlterar() {
     };
   });
   document.querySelectorAll("#folhaCorpo [data-modelo]").forEach((b) => {
-    b.onclick = () => { A.modelo = modelosDe(A.mod, A.sessao).find((m) => m.id === b.dataset.modelo); renderAlterar(); };
+    b.onclick = () => {
+      A.modelo = modelosDe(A.mod, A.sessao).find((m) => m.id === b.dataset.modelo);
+      // O tempo tem de caber no modelo NOVO. Sem isso, 190 min escolhidos para
+      // um longo seguiam valendo ao trocar para um treino de tiros (28/09/2026).
+      if (A.modelo) A.minutos = Math.max(A.modelo.min || 15, Math.min(A.modelo.max || 240, A.minutos));
+      renderAlterar();
+    };
   });
   document.querySelectorAll("#folhaCorpo [data-dmin]").forEach((b) => {
     b.onclick = () => { A.minutos = Math.max(15, Math.min(300, A.minutos + Number(b.dataset.dmin))); renderAlterar(); };

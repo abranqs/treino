@@ -350,9 +350,21 @@
   /* Entrada unica                                                             */
   /* ------------------------------------------------------------------------ */
 
+  // Teto de duracao. Sessao de intensidade alta NAO estica: os tiros sao o
+  // treino, e o tempo a mais viraria volume facil grudado num treino forte.
+  // Em 28/09/2026 o app montou "Tiros de VO2max" com 190 min — 24 min de tiros
+  // e 129 min de Z2 — porque o pedido de minutos ficou de outro modelo.
+  function tetoDe(modelo) {
+    if (!modelo || !modelo.max) return 300;
+    return (modelo.nivel === "alta") ? modelo.max : Math.round(modelo.max * 1.5);
+  }
+
   function gerar(modelo, minutos, ctx) {
     ctx = ctx || {};
     minutos = Math.max(10, Math.round(minutos));
+    const teto = tetoDe(modelo);
+    const pedido = minutos;
+    if (minutos > teto) minutos = teto;
     const r = modelo.modalidade === "forca" ? gerarForca(modelo, minutos, ctx) : gerarEndurance(modelo, minutos);
     const presc = ctx.prescricao;
     if (presc && ORDEM[modelo.nivel || "baixa"] > ORDEM[presc.intensidade_max || "alta"]) {
@@ -362,7 +374,8 @@
           : "Os sinais de hoje liberam no máximo intensidade " + presc.intensidade_max + ". " + presc.resumo,
       });
     }
-    if (modelo.max && minutos > modelo.max) r.avisos.push({ tipo: "duracao", texto: "Acima do que esse treino costuma ter (" + modelo.max + " min): o tempo extra virou volume fácil." });
+    if (pedido > teto) r.avisos.unshift({ tipo: "duracao", texto: "Esse treino não estica: " + pedido + " min viraram " + teto + " min. Para correr mais tempo, escolha um modelo longo." });
+    else if (modelo.max && minutos > modelo.max) r.avisos.push({ tipo: "duracao", texto: "Acima do que esse treino costuma ter (" + modelo.max + " min): o tempo extra virou volume fácil." });
     if (modelo.min && minutos < modelo.min && modelo.modalidade !== "forca") r.avisos.push({ tipo: "duracao", texto: "Abaixo do mínimo útil desse treino (" + modelo.min + " min)." });
     const titulo = modelo.grupo === "plano" ? modelo.nome.replace(/^Do plano: /, "")
       : (modelo.modalidade === "brick" ? modelo.nome : NOME_MOD[modelo.modalidade] + " — " + modelo.nome);
