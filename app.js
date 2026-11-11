@@ -1,17 +1,19 @@
-/* Treino — o guia do dia no celular.
+/* Treino — a tela do dia no celular.
  *
  * Le o treino.json que o computador (treino-ia) publica no repositorio privado
- * ciclo-dados, mostra o dia e deixa ALTERAR qualquer sessao: tempo, modalidade
- * e tipo. O gerador (gerador.js) remonta a sessao na hora, sem internet; a
- * escolha vai para o computador como issue, e de la para o relogio.
+ * ciclo-dados, mostra o dia (prontidao, treino, orientacao, sono, pressao) e
+ * deixa ALTERAR qualquer sessao: tempo, modalidade e tipo. O gerador
+ * (gerador.js) remonta a sessao na hora, sem internet; a escolha vai para o
+ * computador como issue, e de la para o relogio (Amazfit T-Rex 3 Pro, app
+ * Zepp). O registro do dia (saude.js) volta pelo mesmo caminho.
  *
- * Nada aqui fala com a Garmin nem guarda senha. O token do GitHub e o mesmo do
+ * Nada aqui fala com o relogio nem guarda senha. O token do GitHub e o mesmo do
  * Ciclo (mesmo endereco abranqs.github.io, mesmo armazenamento): precisa de
  * Contents (leitura) e Issues (leitura e escrita) no ciclo-dados.
  */
 "use strict";
 
-const VERSAO = "1.1.5";
+const VERSAO = "1.2.0";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -62,18 +64,70 @@ function abrirBanco() {
     } catch { ok(); }
   });
 }
+/* Gravacao que falha (armazenamento cheio, banco bloqueado) nao passa mais em
+ * silencio: o que nao entrou fica em FALHAS, a tela avisa e oferece gravar de
+ * novo. So vale a transacao concluida; "put" aceito ainda pode ser desfeito. */
+const FALHAS = new Map();
+function falhaGravar(store, chave, obj, erro) {
+  FALHAS.set(store + ":" + chave, { store, chave, obj });
+  S.erroGravar = String((erro && (erro.name || erro.message)) || "erro desconhecido");
+  if (Date.now() - (falhaGravar.avisou || 0) > 8000) {
+    falhaGravar.avisou = Date.now();
+    toast("Não consegui gravar no celular. Mantenha o app aberto e veja o aviso na aba Hoje.", 6000);
+  }
+  pedirPersistencia();
+}
+function gravou(store, chave) {
+  if (!FALHAS.size) return;
+  FALHAS.delete(store + ":" + chave);
+  if (!FALHAS.size) S.erroGravar = null;
+}
+async function regravarFalhas() {
+  for (const f of Array.from(FALHAS.values())) await idb._grava(f.store, f.chave, f.obj);
+  toast(FALHAS.size ? "Ainda não gravou. Libere espaço no celular e tente de novo." : "Gravado no celular.", 4000);
+  render();
+}
+
+/* Sem armazenamento persistente o Android pode apagar o banco quando falta
+ * espaco. Pede uma vez por abertura (no Chrome nao abre pergunta nenhuma). */
+async function pedirPersistencia() {
+  if (pedirPersistencia.feito) return;
+  pedirPersistencia.feito = true;
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return;
+    S.persistente = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+  } catch {}
+}
+
 const idb = {
   _t(store, modo) { return BANCO.transaction(store, modo).objectStore(store); },
+  /* obj undefined = apagar a chave */
+  _grava(store, chave, obj) {
+    if (!BANCO) return Promise.resolve();
+    return new Promise((ok) => {
+      let fechou = false;
+      const fim = (erro) => {
+        if (fechou) return;
+        fechou = true;
+        if (erro) falhaGravar(store, chave, obj, erro); else gravou(store, chave);
+        ok();
+      };
+      try {
+        const tx = BANCO.transaction(store, "readwrite");
+        tx.oncomplete = () => fim(null);
+        tx.onerror = tx.onabort = () => fim(tx.error || new Error("gravação desfeita"));
+        if (obj === undefined) tx.objectStore(store).delete(chave); else tx.objectStore(store).put(obj);
+      } catch (e) { fim(e); }
+    });
+  },
   put(store, obj) {
     const chave = store === "kv" ? obj.k : obj.id;
     MEM[store][chave] = obj;
-    if (!BANCO) return Promise.resolve();
-    return new Promise((ok) => { try { const r = this._t(store, "readwrite").put(obj); r.onsuccess = r.onerror = () => ok(); } catch { ok(); } });
+    return this._grava(store, chave, obj);
   },
   del(store, chave) {
     delete MEM[store][chave];
-    if (!BANCO) return Promise.resolve();
-    return new Promise((ok) => { try { const r = this._t(store, "readwrite").delete(chave); r.onsuccess = r.onerror = () => ok(); } catch { ok(); } });
+    return this._grava(store, chave, undefined);
   },
   all(store) {
     if (!BANCO) return Promise.resolve(Object.values(MEM[store]));
@@ -88,7 +142,8 @@ const idb = {
 /* Estado e sincronizacao                                                     */
 /* ------------------------------------------------------------------------- */
 
-const S = { pac: null, recebido: 0, fila: [], trocas: [], forca: [], aba: "hoje", buscando: false, erroSync: null, erroFila: null };
+const S = { pac: null, recebido: 0, fila: [], trocas: [], forca: [], registros: [], aba: "hoje", buscando: false, erroSync: null, erroFila: null,
+  erroGravar: null, semBanco: false, persistente: null };
 
 const CFG = {
   ler(k, pad) { try { return localStorage.getItem(k) || pad; } catch { return pad; } },
@@ -100,6 +155,31 @@ function cabecalhos(extra) {
   return Object.assign({ Authorization: "Bearer " + CFG.token, "X-GitHub-Api-Version": "2022-11-28" }, extra || {});
 }
 
+/* Toda ida a rede tem tempo-limite. Com sinal fraco o fetch ficava pendurado
+ * para sempre: a abertura travava em "Buscando" e a fila nunca mais saia. O
+ * limite vale para a resposta chegar e, de novo, para o corpo terminar de vir. */
+const LIMITE_REDE_MS = 10000;
+const LIMITE_ENVIO_MS = 15000;
+async function pedir(url, opcoes, ms) {
+  const limite = ms || LIMITE_REDE_MS;
+  const ctl = new AbortController();
+  let h = setTimeout(() => ctl.abort(), limite);
+  try {
+    const r = await fetch(url, Object.assign({}, opcoes, { signal: ctl.signal }));
+    clearTimeout(h);
+    h = setTimeout(() => ctl.abort(), limite);
+    const texto = await r.text();
+    return { status: r.status, ok: r.ok, json: () => JSON.parse(texto) };
+  } catch (e) {
+    if (!ctl.signal.aborted) throw e;
+    const lento = new Error("a rede não respondeu em " + Math.round(limite / 1000) + " s (sinal fraco)");
+    lento.lento = true;
+    throw lento;
+  } finally {
+    clearTimeout(h);
+  }
+}
+
 async function buscar(silencioso) {
   if (S.buscando) return;
   if (!DEMO && !CFG.token) { render(); return; }
@@ -107,17 +187,19 @@ async function buscar(silencioso) {
   S.buscando = true;
   renderTopo();
   try {
-    let j;
+    let r;
     if (DEMO) {
-      j = await (await fetch("_local/treino.json", { cache: "no-store" })).json();
+      r = await pedir("_local/treino.json", { cache: "no-store" });
     } else {
-      const r = await fetch("https://api.github.com/repos/" + CFG.repo + "/contents/treino.json",
+      r = await pedir("https://api.github.com/repos/" + CFG.repo + "/contents/treino.json",
         { headers: cabecalhos({ Accept: "application/vnd.github.raw+json" }), cache: "no-store" });
       if (r.status === 401) throw new Error("token inválido ou expirado");
       if (r.status === 404) throw new Error("treino.json não encontrado — o computador ainda não publicou, ou o token não vê o ciclo-dados");
       if (!r.ok) throw new Error("GitHub respondeu " + r.status);
-      j = await r.json();
     }
+    let j;
+    try { j = r.json(); } catch { throw new Error("o treino.json chegou incompleto"); }
+    if (!j || typeof j !== "object") throw new Error("o treino.json veio vazio");
     S.pac = j;
     S.recebido = Date.now();
     S.erroSync = null;
@@ -129,10 +211,24 @@ async function buscar(silencioso) {
     if (!silencioso) toast("Não atualizou: " + e.message, 5000);
   } finally {
     S.buscando = false;
-    render();
+    renderSeLivre();
     enviarFila();
   }
 }
+
+/* Treino de forca e registro do dia que o computador ja confirmou nao precisam
+ * mais sair daqui. Acontece quando a issue foi criada mas a resposta se perdeu
+ * (tempo-limite): sem isto, a fila mandaria a mesma coisa de novo. Troca nao
+ * entra: ela pode ter sido alterada de novo no celular com o mesmo id. */
+async function tirarDaFila(id) {
+  if (!S.fila.some((f) => f.id === id)) return;
+  S.fila = S.fila.filter((f) => f.id !== id);
+  await idb.del("fila", id);
+}
+
+function salvarRegistros() { return idb.put("kv", { k: "registros", v: S.registros }); }
+
+const FOLGA_RELOGIO_MS = 60000;   // diferenca toleravel entre o relogio do celular e o do computador
 
 /* A troca feita aqui vira oficial quando o computador a aplica e republica.
  * Ate la ela e mostrada por cima do que veio publicado. */
@@ -143,11 +239,30 @@ async function limparAplicados() {
     const a = aplicadas.get(t.id);
     if (!a) continue;
     // so sai do celular a troca que o computador aplicou de fato (resultado ok)
-    if (a.aplicado_em || (a.resultado && a.resultado.ok)) { await idb.del("trocas", t.id); S.trocas = S.trocas.filter((x) => x.id !== t.id); continue; }
+    if (!(a.resultado && a.resultado.atrasada) && (a.aplicado_em || (a.resultado && a.resultado.ok))) { await idb.del("trocas", t.id); S.trocas = S.trocas.filter((x) => x.id !== t.id); continue; }
+    // recusada por atraso (chegou depois do dia ou do treino): reenviar nao adianta. So avisa e deixa desfazer.
+    if (a.resultado && a.resultado.atrasada) {
+      await tirarDaFila(t.id);
+      if (!t.atrasada) {
+        if (t.data >= hojeLocal()) toast("Uma alteração chegou atrasada ao computador e não foi aplicada.", 5000);
+        t.atrasada = true;
+        t.falha = String(a.resultado.erro || "chegou atrasada").slice(0, 120);
+        t.enviada_em = null;
+        await idb.put("trocas", t);
+      }
+      continue;
+    }
     // recusada: fica pendente, com aviso na tela, e volta para a fila na proxima abertura (iniciar)
     if (S.fila.some((f) => f.id === t.id)) continue;
-    // reenviada ha pouco: o resultado publicado ainda pode ser o da tentativa anterior
-    if (t.falha && t.enviada_em && Date.now() - new Date(t.enviada_em).getTime() < 10 * 60000) continue;
+    // reenviada: o resultado publicado pode ser o da tentativa anterior. Com
+    // recebido_em o computador diz quando viu a issue; se foi antes do reenvio,
+    // ainda nao e a resposta desta tentativa. Sem o campo, folga fixa de 10 min.
+    if (t.falha && t.enviada_em) {
+      const reenvio = new Date(t.enviada_em).getTime();
+      const visto = a.recebido_em ? new Date(a.recebido_em).getTime() : NaN;
+      if (!isNaN(visto)) { if (visto < reenvio - FOLGA_RELOGIO_MS) continue; }
+      else if (Date.now() - reenvio < 10 * 60000) continue;
+    }
     if (!t.falha) toast("Uma alteração não foi aplicada no computador — continua pendente aqui.", 5000);
     t.falha = String((a.resultado && a.resultado.erro) || "sem motivo informado").slice(0, 120);
     t.enviada_em = null;
@@ -155,7 +270,14 @@ async function limparAplicados() {
   }
   const recebidos = new Set(S.pac.forca_recebidos || []);
   for (const f of S.forca) {
-    if (f.status === "concluido" && recebidos.has(f.id) && !f.no_computador) { f.no_computador = true; await idb.put("forca", f); }
+    if (f.status === "concluido" && recebidos.has(f.id) && !f.no_computador) { f.no_computador = true; await idb.put("forca", f); await tirarDaFila(f.id); }
+  }
+  // registro do dia: sai do celular quando o computador publica o id em registros_recebidos
+  const registrados = new Set(S.pac.registros_recebidos || []);
+  if (S.registros.some((r) => registrados.has(r.id))) {
+    for (const r of S.registros) if (registrados.has(r.id)) await tirarDaFila(r.id);
+    S.registros = S.registros.filter((r) => !registrados.has(r.id));
+    await salvarRegistros();
   }
 }
 
@@ -201,21 +323,28 @@ async function enviarFila(manual) {
   if (manual) toast("Enviando…");
   enviarFila.rodando = true;
   try {
-    for (const item of S.fila.slice().sort((a, b) => a.criado_em.localeCompare(b.criado_em))) {
+    // Um item por vez, sempre o mais antigo ainda nao tentado NESTA rodada. A fila e
+    // relida a cada volta: o que entrou durante o envio (o registro de hoje logo
+    // atras do de ontem) sai na mesma rodada, e o que foi confirmado nesse meio-tempo nao e reenviado.
+    const tentados = new Set();
+    for (;;) {
+      const item = S.fila.filter((x) => !tentados.has(x.id)).sort((a, b) => a.criado_em.localeCompare(b.criado_em))[0];
+      if (!item) break;
+      tentados.add(item.id);
       let ok = false;
       if (DEMO) {
         await new Promise((r) => setTimeout(r, 400));
         console.log("[demo] issue", item.titulo, item.corpo);
         ok = true;
       } else {
-        const r = await fetch("https://api.github.com/repos/" + CFG.repo + "/issues", {
+        const r = await pedir("https://api.github.com/repos/" + CFG.repo + "/issues", {
           method: "POST", headers: cabecalhos({ Accept: "application/vnd.github+json", "Content-Type": "application/json" }),
           body: JSON.stringify({ title: item.titulo, body: JSON.stringify(item.corpo) }),
-        });
+        }, LIMITE_ENVIO_MS);
         if (r.status === 201) ok = true;
         else if ([401, 403, 404].includes(r.status)) {
           let msg = "";
-          try { msg = (await r.json()).message || ""; } catch {}
+          try { msg = r.json().message || ""; } catch {}
           S.erroFila = "O token não pode criar issues no ciclo-dados (GitHub " + r.status + (msg ? ": " + msg : "") +
             "). Confira no GitHub se a permissão Issues: Read and write foi salva no MESMO token que está neste celular.";
           break;
@@ -232,14 +361,18 @@ async function enviarFila(manual) {
         if (t) { t.enviada_em = agoraIso(); await idb.put("trocas", t); }
         const f = S.forca.find((x) => x.id === item.id);
         if (f) { f.enviado_em = agoraIso(); await idb.put("forca", f); }
+        const g = S.registros.find((x) => x.id === item.id);
+        if (g) { g.enviado_em = agoraIso(); await salvarRegistros(); }
       }
     }
   } catch (e) {
-    S.erroFila = "Sem conexão com o GitHub — o que está na fila sai quando voltar.";
+    S.erroFila = e && e.lento
+      ? "A rede não respondeu a tempo (sinal fraco) — o que está na fila sai quando o sinal melhorar."
+      : "Sem conexão com o GitHub — o que está na fila sai quando voltar.";
   } finally {
     enviarFila.rodando = false;
     if (manual) toast(S.erroFila ? S.erroFila : "Enviado.", S.erroFila ? 6000 : 2500);
-    render();
+    renderSeLivre();
   }
 }
 
@@ -325,7 +458,19 @@ function render() {
     const b = $("#tentar"); if (b) b.onclick = () => buscar(false);
     return;
   }
-  ({ hoje: renderHoje, semana: renderSemana, forca: renderForcaAba, mais: renderMais })[S.aba]();
+  ({ hoje: renderHoje, semana: renderSemana, saude: renderSaude, forca: renderForcaAba, mais: renderMais })[S.aba]();
+}
+
+/* Redesenho pedido pela sincronizacao (nao por um toque): se ha um campo em
+ * uso, espera ele perder o foco. Redesenhar no meio fecha o teclado do Android. */
+function digitando() {
+  const a = document.activeElement;
+  return !!(a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && a.closest && a.closest("#tela"));
+}
+function renderSeLivre() {
+  if (digitando()) { renderSeLivre.pendente = true; renderTopo(); return; }
+  renderSeLivre.pendente = false;
+  render();
 }
 
 function renderTopo() {
@@ -348,11 +493,15 @@ function quandoRecebido() {
 
 function avisosGerais() {
   let h = "";
+  if (S.erroGravar) h += '<div class="aviso veto">Não consegui gravar no celular (' + esc(S.erroGravar) + "). O que você fez continua na tela, mas se perde se o app fechar. " +
+    'Libere espaço no celular e toque em gravar de novo.<div class="acoes"><button class="btn small" id="regravar">Gravar de novo</button></div></div>';
+  else if (S.semBanco) h += '<div class="aviso veto">Este navegador não abriu o armazenamento local (aba anônima ou bloqueio). O que você registrar vale só enquanto o app estiver aberto.</div>';
   if (S.erroFila && S.fila.length) h += '<div class="aviso veto">' + esc(S.erroFila) + '<div class="acoes"><button class="btn small" id="tentarFila">Tentar enviar de novo</button> <button class="btn small ghost" id="descartarFila">Descartar alterações</button></div></div>';
   for (const t of S.trocas) {
     if (!t.falha || t.data < hojeLocal()) continue;
     h += '<div class="aviso veto">A alteração de ' + esc(nomeDia(t.data, true)) + " não foi aplicada no computador (" + esc(t.falha) + "). " +
-      (t.enviada_em ? "Foi reenviada; aguardando o computador." :
+      (t.atrasada ? 'Chegou atrasada e não será reenviada. <button class="btn small ghost" data-desfazer="' + esc(t.id) + '">Desfazer alteração</button>' :
+        t.enviada_em ? "Foi reenviada; aguardando o computador." :
         'Continua pendente e é reenviada na próxima abertura. <button class="btn small ghost" data-desfazer="' + esc(t.id) + '">Desfazer alteração</button>') + "</div>";
   }
   if (S.erroSync) h += '<div class="aviso">Última atualização falhou: ' + esc(S.erroSync) + "</div>";
@@ -366,34 +515,63 @@ function renderHoje() {
   const p = S.pac;
   const h = hojeLocal();
   const dia = diasVisiveis().find((d) => d.data === h) || { data: h, sessoes: [] };
-  let html = htmlTopo(nomeDia(h), esc(quandoRecebido()) + (p.prova && p.prova.dias >= 0 ? " · " + esc(p.prova.nome) + " em " + p.prova.dias + " dias" : ""));
+  let html = htmlTopo(nomeDia(h), esc(quandoRecebido()) + (p.prova && p.prova.dias != null && p.prova.dias >= 0 ? " · " + esc(p.prova.nome) + " em " + p.prova.dias + " dias" : ""));
   html += avisosGerais();
   if (p.hoje === h) html += htmlProntidao(p);
   html += "<h2>Treino de hoje</h2>";
   if (!dia.sessoes.length) html += '<div class="card vazio">Sem treino planejado hoje.</div>';
   dia.sessoes.forEach((s) => { html += htmlSessao(s, h); });
   html += '<button class="btn ghost" style="width:100%" data-add="' + h + '">+ Adicionar treino hoje</button>';
-  if (p.orientacao && p.orientacao.criado_em && p.orientacao.criado_em.slice(0, 10) === h) {
-    html += '<h2>Orientação da manhã</h2><div class="card"><details><summary>Ler a orientação das ' +
-      esc(p.orientacao.criado_em.slice(11, 16)) + '</summary><div class="md">' + markdown(p.orientacao.texto) + "</div></details></div>";
-  }
-  if (p.noite && p.hoje === h) html += htmlNoite(p.noite);
-  if (p.semana) html += htmlSemanaResumo(p.semana);
+  html += htmlOrientacao(p, h);
+  if (typeof htmlSonoPressaoHoje === "function") html += htmlSonoPressaoHoje(p);
+  if (typeof htmlRegistro === "function") html += htmlRegistro();
   $("#tela").innerHTML = html;
   ligarTela();
+  if (typeof ligarRegistro === "function") ligarRegistro();
+}
+
+/* A orientacao do treinador abre com o que nao pode passar batido (a linha do
+ * treino de hoje e os avisos que o computador poe no topo); esse comeco fica
+ * sempre a vista e o resto abre no toque. */
+function htmlOrientacao(p, h) {
+  const o = p.orientacao;
+  const deHoje = !!(o && o.texto && o.criado_em && o.criado_em.slice(0, 10) === h);
+  // aviso publicado a parte (p.avisos) que nao esteja repetido no texto tambem aparece
+  const chapa = (t) => String(t || "").normalize("NFD").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const soltos = (p.hoje === h && Array.isArray(p.avisos) ? p.avisos : []).filter((a) => a && !(deHoje && chapa(o.texto).includes(chapa(a))));
+  const avisos = soltos.map((a) => '<div class="aviso">' + esc(a) + "</div>").join("");
+  if (!deHoje) return "<h2>Orientação do treinador</h2>" + avisos + '<div class="card flat sub">A orientação de hoje ainda não chegou.</div>';
+  const partes = String(o.texto).replace(/\r/g, "").split(/\n\s*\n/).filter((x) => x.trim());
+  // os avisos vem antes da linha "TREINO DE HOJE": fica a vista tudo ate ela (ou so o primeiro paragrafo, se ela nao existir)
+  const iTreino = partes.slice(0, 6).findIndex((t) => /^\s*\*{0,2}\s*treino de hoje/i.test(t));
+  const n = iTreino >= 0 ? iTreino + 1 : 1;
+  const topo = partes.slice(0, n).join("\n\n"), resto = partes.slice(n).join("\n\n");
+  return "<h2>Orientação do treinador</h2>" + avisos + '<div class="card"><div class="md">' + markdown(topo) + "</div>" +
+    (resto ? "<details><summary>Ler a orientação completa das " + esc(o.criado_em.slice(11, 16)) + '</summary><div class="md">' + markdown(resto) + "</div></details>" : "") + "</div>";
 }
 
 function corScore(v) { return v == null ? "var(--i0)" : v >= 75 ? "var(--ok)" : v >= 55 ? "var(--warn)" : "var(--bad)"; }
+
+/* Prontidao calculada sem VFC da noite, ou com confianca baixa, e um numero
+ * provisorio: aparece assim, sem o rotulo de faixa. */
+function prontidaoProvisoria(p) {
+  const pr = p.prontidao || {}, ps = p.prescricao || {};
+  if (pr.provisoria || /baixa/i.test(String(pr.confianca || ""))) return "confiança baixa";
+  const temVfc = (ps.hrv && ps.hrv.rmssd) || (p.noite && p.noite.rmssd) || (pr.componentes && pr.componentes.hrv != null);
+  return temVfc ? "" : "sem VFC desta noite";
+}
 
 function htmlProntidao(p) {
   const pr = p.prontidao || {}, ps = p.prescricao || {};
   const v = pr.score;
   const c = 2 * Math.PI * 40, frac = v == null ? 0 : Math.max(0, Math.min(1, v / 100));
-  const nivel = { alta: ["liberado para forte", "ok"], moderada: ["até moderado (sem Z4-Z5)", "warn"], baixa: ["só leve", "bad"], zero: ["descanso", "bad"] }[ps.intensidade_max] || ["", ""];
+  const prov = prontidaoProvisoria(p);
+  const nivel = prov ? ["provisória · " + prov, ""]
+    : { alta: ["liberado para forte", "ok"], moderada: ["até moderado (sem Z4-Z5)", "warn"], baixa: ["só leve", "bad"], zero: ["descanso", "bad"] }[ps.intensidade_max] || ["", ""];
   let h = '<div class="card"><div class="pront"><div class="anel"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--card2)" stroke-width="10"/>' +
-    '<circle cx="50" cy="50" r="40" fill="none" stroke="' + corScore(v) + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (c * frac) + " " + c + '"/></svg>' +
+    '<circle cx="50" cy="50" r="40" fill="none" stroke="' + (prov ? "var(--mute)" : corScore(v)) + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (c * frac) + " " + c + '"/></svg>' +
     '<b class="num">' + (v == null ? "—" : Math.round(v)) + "</b><small>PRONTIDÃO</small></div><div>" +
-    '<span class="badge ' + nivel[1] + '"><span class="dot"></span>' + esc(nivel[0]) + "</span>" +
+    (nivel[0] ? '<span class="badge ' + nivel[1] + '"><span class="dot"></span>' + esc(nivel[0]) + "</span>" : "") +
     (ps.fator_volume && ps.fator_volume !== 1 ? ' <span class="badge warn">volume ×' + ps.fator_volume + "</span>" : "") +
     '<div class="regra" style="margin-top:6px">' + esc(ps.resumo || "") + "</div></div></div>";
   const hrv = ps.hrv || {};
@@ -405,9 +583,10 @@ function htmlProntidao(p) {
   return h;
 }
 
+/* Sinais da ultima noite (VFC, FC, SpO2): entra no cartao de sono da aba Saude. */
 function htmlNoite(n) {
   const sit = { dentro: "ok", acima: "warn", abaixo: "warn" };
-  let h = '<h2>A noite</h2><div class="card"><div class="row"><div><b style="font-size:22px" class="num">' + (n.rmssd ? Math.round(n.rmssd) + " ms" : "—") +
+  let h = '<div><div class="row"><div><b style="font-size:22px" class="num">' + (n.rmssd ? Math.round(n.rmssd) + " ms" : "—") +
     '</b> <span class="sub">VFC do sono</span></div><div class="sp"></div>' +
     (n.cobertura_pct != null ? '<span class="badge ' + (n.cobertura_pct >= 80 ? "ok" : "warn") + '">' + Math.round(n.cobertura_pct) + "% do sono</span>" : "") + "</div>" +
     '<div class="sub" style="margin:4px 0 8px">' + esc(n.status || "") + "</div><div class=\"chips wrap\">";
@@ -420,21 +599,41 @@ function htmlNoite(n) {
 
 function htmlSemanaResumo(sem) {
   const nomes = { corrida: "Corrida", bike: "Bike", natacao: "Natação", forca: "Força" };
-  let h = '<h2>Semana</h2><div class="card">';
+  let h = '<h2>Por modalidade</h2><div class="card">';
   for (const [k, m] of Object.entries(sem.modalidades || {})) {
+    if (!m) continue;
     const alvo = Math.max(m.plano_min || 0, m.feito_min || 0, 1);
     const meta = m.meta_sessoes ? " · " + m.sessoes_feitas + "/" + m.meta_sessoes + " sessões" : "";
-    h += '<div class="mod"><span>' + nomes[k] + '</span><div class="trilho"><span style="width:' + Math.min(100, 100 * m.feito_min / alvo) +
-      "%;background:" + CORES_MOD[k] + '"></span>' + (m.plano_min ? '<u style="left:calc(' + Math.min(100, 100 * m.plano_min / alvo) + '% - 2px)"></u>' : "") +
-      '</div><span class="sub num">' + m.feito_min + "/" + m.plano_min + " min" + meta + "</span></div>";
+    h += '<div class="mod"><span>' + esc(nomes[k] || k) + '</span><div class="trilho"><span style="width:' + Math.min(100, 100 * (m.feito_min || 0) / alvo) +
+      "%;background:" + (CORES_MOD[k] || "var(--acc)") + '"></span>' + (m.plano_min ? '<u style="left:calc(' + Math.min(100, 100 * m.plano_min / alvo) + '% - 2px)"></u>' : "") +
+      '</div><span class="sub num">' + (m.feito_min || 0) + "/" + (m.plano_min || 0) + " min" + meta + "</span></div>";
   }
-  return h + '<div class="sub">Traço: planejado na semana. Barra: feito até agora (atividades do Garmin).</div></div>';
+  return h + '<div class="sub">Traço: planejado na semana. Barra: feito até agora (atividades do relógio).</div></div>';
+}
+
+/* Feito x planejado, dia a dia, em minutos: duas colunas por dia. */
+function htmlSemanaDias(sem) {
+  const dias = sem && Array.isArray(sem.dias) ? sem.dias.filter((d) => d && d.data) : [];
+  let h = "<h2>Feito × planejado</h2>";
+  if (!dias.length) return h + '<div class="card flat sub">Ainda sem dados da semana por dia: o computador não publicou esse quadro.</div>';
+  const hoje = hojeLocal();
+  const soma = (k) => dias.reduce((s, d) => s + (d[k] || 0), 0);
+  const plan = sem.total_planejado != null ? sem.total_planejado : soma("planejado_min");
+  const feito = sem.total_feito != null ? sem.total_feito : soma("feito_min");
+  const teto = Math.max(1, ...dias.map((d) => Math.max(d.planejado_min || 0, d.feito_min || 0)));
+  const alt = (v) => (v > 0 ? Math.max(3, Math.round(100 * v / teto)) : 0);
+  h += '<div class="card"><div class="row"><b class="num" style="font-size:22px">' + fmtMin(feito) + '</b><span class="sub">feitos de ' + fmtMin(plan) + " planejados</span>" +
+    '<span class="sp"></span>' + (plan ? '<span class="badge num">' + Math.round(100 * feito / plan) + "%</span>" : "") + "</div>";
+  h += '<div class="cols">' + dias.map((d) => '<div class="col"><span style="height:' + alt(d.planejado_min || 0) + '%"></span><span class="ft" style="height:' + alt(d.feito_min || 0) + '%"></span></div>').join("") + "</div>";
+  h += '<div class="eixo">' + dias.map((d) => '<div class="' + (d.data === hoje ? "hoje" : "") + '">' + DIAS_SEM[new Date(d.data + "T12:00:00").getDay()].slice(0, 3) +
+    '<b class="num">' + Math.round(d.feito_min || 0) + '</b><span class="num">de ' + Math.round(d.planejado_min || 0) + "</span></div>").join("") + "</div>";
+  return h + '<div class="sub" style="margin-top:8px">Coluna cinza: planejado. Coluna verde: feito. Em minutos.</div></div>';
 }
 
 function statusSessao(s) {
   if (s.local) {
     if (s.local.enviada_em) return '<span class="badge info">enviada · o computador manda ao relógio</span>';
-    return '<span class="badge warn">' + (s.local.falha ? "não aplicada · pendente" : "na fila do celular") + '</span> <button class="btn small ghost" data-desfazer="' + esc(s.local.id) + '">Desfazer alteração</button>';
+    return '<span class="badge warn">' + (s.local.atrasada ? "não aplicada · chegou atrasada" : s.local.falha ? "não aplicada · pendente" : "na fila do celular") + '</span> <button class="btn small ghost" data-desfazer="' + esc(s.local.id) + '">Desfazer alteração</button>';
   }
   if (s.status === "feito") return '<span class="badge ok">feito ✓</span>';
   if (s.status === "perdido") return '<span class="badge bad">perdido</span>';
@@ -485,8 +684,12 @@ function htmlSessao(s, data) {
 
 function renderSemana() {
   const h = hojeLocal();
-  let html = htmlTopo("Próximos dias", esc(quandoRecebido()));
+  const sem = S.pac.semana || null;
+  let html = htmlTopo("Semana", esc(quandoRecebido()));
   html += avisosGerais();
+  html += htmlSemanaDias(sem);
+  if (sem && sem.modalidades) html += htmlSemanaResumo(sem);
+  html += "<h2>Sessões</h2>";
   for (const d of diasVisiveis()) {
     if (d.data < h && !d.sessoes.length) continue;
     html += '<div class="dia ' + (d.data === h ? "hoje" : "") + '">' + esc(nomeDia(d.data)) + '<span class="sp" style="flex:1"></span>' +
@@ -511,9 +714,12 @@ function renderMais() {
   S.fila.forEach((f) => { html += '<div class="row" style="padding:6px 0"><span>' + esc(f.titulo) + '</span><span class="sp"></span><span class="sub">' + esc(new Date(f.criado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })) + "</span></div>"; });
   if (S.fila.length) html += '<button class="btn main" style="width:100%;margin-top:8px" id="enviarAgora">Enviar agora</button>' +
     (S.erroFila ? '<div class="sub" style="margin-top:8px">' + esc(S.erroFila) + "</div>" : "");
+  html += '<div class="sub" style="margin-top:8px">Armazenamento neste celular: ' + (S.semBanco ? "indisponível (só enquanto o app está aberto)" :
+    S.persistente === true ? "persistente" : S.persistente === false ? "comum — o Android pode limpar se faltar espaço; instalar o app na tela inicial ajuda" : "sem confirmação do navegador") + ".</div>";
   html += "</div>";
-  html += '<h2>Como funciona</h2><div class="card md"><p>O computador publica o plano, a prontidão e a biblioteca de treinos. Aqui você altera tempo, modalidade e tipo: o treino se remonta na hora, com seus alvos (FC pelas suas zonas de limiar, paces, CSS da natação) e o histórico de cargas.</p>' +
-    "<p>O que você salva vai para o computador, que grava no plano e manda ao relógio em até 5 minutos, desde que ele esteja ligado. No relógio, sincronize com o Garmin Connect para o treino aparecer.</p>" +
+  html += '<h2>Como funciona</h2><div class="card md"><p>O computador publica o plano, a prontidão, a saúde e a biblioteca de treinos. Aqui você altera tempo, modalidade e tipo: o treino se remonta na hora, com seus alvos (FC pelas suas zonas de limiar, paces, CSS da natação) e o histórico de cargas.</p>' +
+    "<p>O que você salva vai para o computador, que grava no plano e manda ao relógio em até 5 minutos, desde que ele esteja ligado. O relógio é o Amazfit T-Rex 3 Pro: abra o app Zepp e sincronize para o treino aparecer.</p>" +
+    "<p>O registro do dia (nota, vinho, cigarros, pressão, peso) segue o mesmo caminho e aparece como “aguardando o computador” até ele confirmar.</p>" +
     '<p>Bike e brick: o treino também aparece no <a href="../ciclo/" style="color:var(--acc)">Ciclo</a>.</p></div>';
   $("#tela").innerHTML = html;
   ligarTela();
@@ -548,6 +754,7 @@ function ligarConexao() {
 
 function ligarTela() {
   const bs = $("#btnSync"); if (bs) bs.onclick = () => buscar(false);
+  const rg = $("#regravar"); if (rg) rg.onclick = () => regravarFalhas();
   const tf = $("#tentarFila"); if (tf) tf.onclick = () => { S.erroFila = null; enviarFila(true); };
   const df = $("#descartarFila"); if (df) df.onclick = () => { if (confirm("Descartar as alterações que ainda não saíram do celular? Treinos de força registrados continuam na fila.")) descartarFila(); };
   document.querySelectorAll("[data-desfazer]").forEach((b) => {
@@ -602,8 +809,20 @@ const NOME_GRUPO = { plano: "Do plano", leve: "Leve", longo: "Longo", tecnica: "
 
 const A = { data: null, sessao: null, mod: null, modelo: null, minutos: 45 };
 
+/* Dia que ja passou e sessao ja feita nao recebem troca: aplicada, ela
+ * reescreveria o que ja aconteceu. Vale ao abrir e de novo ao salvar (a folha
+ * pode ter ficado aberta na virada do dia ou enquanto o treino era feito). */
+function motivoSemTroca(data, s) {
+  if (!data || data < hojeLocal()) return "Esse dia já passou: não dá mais para alterar.";
+  if (s && s.status === "feito") return "Esse treino já foi feito: não dá para alterar.";
+  if (s && s.status === "trocado") return "Esse treino já foi trocado no computador.";
+  return "";
+}
+
 function abrirAlterar(data, id) {
   const s = id != null ? sessaoPorId(data, id) : null;
+  const motivo = motivoSemTroca(data, s);
+  if (motivo) { toast(motivo, 3500); return; }
   A.data = data;
   A.sessao = s;
   A.livre = false;
@@ -706,6 +925,8 @@ function ligarAlterar() {
 }
 
 async function salvarAlteracao() {
+  const motivo = motivoSemTroca(A.data, (A.sessao && sessaoPorId(A.data, A.sessao.id)) || A.sessao);
+  if (motivo) { fecharFolha(); toast(motivo, 3500); render(); return; }
   const s = A.sessao;
   const idNum = s && /^\d+$/.test(String(s.id)) ? Number(s.id) : null;
   const refTroca = s && s.local && idNum == null ? (s.local.ref_troca || s.local.id) : null;
@@ -726,8 +947,14 @@ async function salvarAlteracao() {
       tipo: "troca", id: uid(), criado_em: agoraIso(), data: A.data,
       acao: s ? "trocar" : "adicionar", sessao_id: idNum, ref_troca: refTroca, sessao: g,
     };
-    // alterar de novo um treino que ainda nao saiu do celular: substitui na fila
-    if (s && s.local && !s.local.enviada_em) {
+    if (s && s.local && s.local.atrasada) {
+      // a tentativa anterior chegou atrasada e nao e reenviada: esta entra no lugar dela, com id novo
+      await removerLocal(s.local.id);
+      troca.acao = s.local.acao;
+      troca.sessao_id = s.local.sessao_id;
+      troca.ref_troca = s.local.ref_troca;
+    } else if (s && s.local && !s.local.enviada_em) {
+      // alterar de novo um treino que ainda nao saiu do celular: substitui na fila
       troca.id = s.local.id;
       troca.acao = s.local.acao;
       troca.sessao_id = s.local.sessao_id;
@@ -794,9 +1021,20 @@ async function iniciar() {
   S.fila = await idb.all("fila");
   S.trocas = await idb.all("trocas");
   S.forca = await idb.all("forca");
+  const rg = await idb.get("kv", "registros");
+  // registro enviado ha mais de 30 dias sem confirmacao nao volta a aparecer como pendente
+  S.registros = ((rg && rg.v) || []).filter((r) => !r.enviado_em || Date.now() - new Date(r.enviado_em).getTime() < 30 * 864e5);
+  S.semBanco = !BANCO;
+  pedirPersistencia();
+  if (typeof carregarRascunho === "function") await carregarRascunho();
+  // troca recusada por atraso nao e reenviada; a de um dia que ja passou sai do celular
+  for (const t of S.trocas.filter((x) => x.atrasada && x.data < hojeLocal())) {
+    S.trocas = S.trocas.filter((x) => x.id !== t.id);
+    await idb.del("trocas", t.id);
+  }
   // troca que o computador recusou (limparAplicados): volta para a fila uma vez a cada abertura
   for (const t of S.trocas) {
-    if (!t.falha || S.fila.some((f) => f.id === t.id)) continue;
+    if (!t.falha || t.atrasada || S.fila.some((f) => f.id === t.id)) continue;
     const corpo = Object.assign({}, t);
     delete corpo.falha; delete corpo.enviada_em;
     const item = { id: t.id, titulo: "treino-app troca " + t.data, corpo, criado_em: agoraIso(), tentativas: 0 };
@@ -807,6 +1045,8 @@ async function iniciar() {
   $("#folhaFechar").onclick = () => fecharFolha();
   window.addEventListener("popstate", () => { fecharFolha(true); if (typeof fecharPlayerPeloVoltar === "function") fecharPlayerPeloVoltar(); });
   window.addEventListener("online", () => { enviarFila(); buscar(true); });
+  // redesenho que ficou esperando o campo perder o foco (renderSeLivre)
+  $("#tela").addEventListener("focusout", () => { setTimeout(() => { if (renderSeLivre.pendente && !digitando()) renderSeLivre(); }, 200); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     if (Date.now() - S.recebido > 5 * 60000) buscar(true); else enviarFila();

@@ -190,7 +190,7 @@ function avancarAuto() {
 function tickAuto() {
   if (!PL.log || document.hidden) return;          // fora da tela nao conta nem registra
   const pausou = lacunaAuto();
-  if (PL.tela === "lista") return;
+  if (PL.tela === "lista" || PL.tela === "editar") return;   // lista aberta ou serie em correcao: nao avanca nem redesenha
   if (pausou || avancarAuto()) { renderPlayer(); return; }
   const a = estadoAuto();
   if (!a.iniciado || PL.tela === "fim") return;
@@ -245,9 +245,9 @@ function renderAuto(corpo) {
 
   if (n) {
     h += '<table class="tabela num"><tr><th>Série</th><th>kg</th><th>' + (e.medida === "s" ? "seg" : "reps") + "</th><th></th></tr>" +
-      e.feitas.map((f, i) => "<tr class=\"feita\"><td>" + (i + 1) + " ✓</td><td>" + (f.kg || 0) + "</td><td>" + (f.reps != null ? f.reps : f.s) + "</td><td>" +
-        (i === n - 1 ? '<button class="btn small ghost" id="aCorrigir">usar valores acima</button>' : "") + "</td></tr>").join("") + "</table>" +
-      '<div class="sub">Saiu diferente? Ajuste kg e reps acima e toque em "usar valores acima" para corrigir a última série.</div>';
+      e.feitas.map((f, i) => "<tr class=\"feita\" data-ed=\"" + i + "\"><td>" + (i + 1) + " ✓</td><td>" + (f.kg || 0) + "</td><td>" + (f.reps != null ? f.reps : f.s) + "</td><td>" +
+        (i === n - 1 ? '<button class="btn small ghost" id="aCorrigir">usar valores acima</button>' : "✎") + "</td></tr>").join("") + "</table>" +
+      '<div class="sub">Saiu diferente? Toque na série para corrigir ou apagar. Para a última, ajuste kg e reps acima e toque em "usar valores acima".</div>';
   }
 
   h += '<div class="lbl">Tempo por série (execução + descanso)</div>' +
@@ -269,6 +269,7 @@ function renderAuto(corpo) {
   corpo.querySelectorAll("[data-reps]").forEach((b) => { b.onclick = () => { en.reps = Math.max(0, en.reps + Number(b.dataset.reps)); renderPlayer(); }; });
   corpo.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => { en.s = Math.max(5, en.s + Number(b.dataset.s)); renderPlayer(); }; });
   ligarTeclados(corpo, e, en);
+  ligarEdicao(corpo, log.atual);
   const mudarCiclo = (v) => { e.ciclo_s = Math.max(20, Math.min(600, v)); guardarCiclo(e.chave, e.ciclo_s); idb.put("forca", log); renderPlayer(); };
   corpo.querySelectorAll("[data-ciclo]").forEach((b) => { b.onclick = () => mudarCiclo(ciclo + Number(b.dataset.ciclo)); });
   corpo.querySelectorAll("[data-cicloset]").forEach((b) => { b.onclick = () => mudarCiclo(Number(b.dataset.cicloset)); });

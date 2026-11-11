@@ -273,7 +273,9 @@ function fecharPlayerPeloVoltar() {
   render();
 }
 
-document.addEventListener("visibilitychange", () => { if (PL.aberto && document.visibilityState === "visible") travarTela(); });
+document.addEventListener("visibilitychange", () => { if (PL.aberto && document.visibilityState === "visible") { travarTela(); tickPlayer(); } });
+
+function vibrar(padrao) { try { if (navigator.vibrate) navigator.vibrate(padrao); } catch {} }
 
 function exAtual() { return PL.log.exercicios[PL.log.atual]; }
 
@@ -296,12 +298,13 @@ function tickPlayer() {
   if (!PL.log) return;
   const seg = Math.floor((Date.now() - new Date(PL.log.inicio).getTime()) / 1000);
   $("#pTempo").textContent = Math.floor(seg / 60) + ":" + String(seg % 60).padStart(2, "0") + " de treino";
-  if (typeof modoAuto === "function" && modoAuto()) { tickAuto(); return; }
+  if (typeof modoAuto === "function" && modoAuto()) { $("#descanso").classList.remove("on"); tickAuto(); return; }   // a faixa de descanso e do modo manual
   if ($("#descanso").classList.contains("on")) {
     const r = Math.ceil((PL.fimDescanso - Date.now()) / 1000);
     $("#dTempo").textContent = r <= 0 ? "Bora!" : Math.floor(r / 60) + ":" + String(r % 60).padStart(2, "0");
-    if (r === 10 && !PL.avisou10) { PL.avisou10 = true; bip(1); }
-    if (r <= 0 && !PL.acabou) { PL.acabou = true; bip(3); try { navigator.vibrate && navigator.vibrate([300, 150, 300, 150, 500]); } catch {} setTimeout(() => fimDescanso(false), 1200); }
+    // "<= 10" e nao "=== 10": com o app em segundo plano o navegador pula segundos
+    if (r <= 10 && r > 0 && !PL.avisou10) { PL.avisou10 = true; bip(1); vibrar(200); }
+    if (r <= 0 && !PL.acabou) { PL.acabou = true; bip(3); vibrar([300, 150, 300, 150, 500]); setTimeout(() => fimDescanso(false), 1200); }
   }
   if (PL.cronometro) {
     const el = $("#pCrono");
@@ -309,7 +312,7 @@ function tickPlayer() {
       const s = Math.floor((Date.now() - PL.cronometro) / 1000);
       el.textContent = s + " s";
       const e = exAtual();
-      if (e && s === (e.alvo_s || 40) && !PL.cronoAvisou) { PL.cronoAvisou = true; bip(2); try { navigator.vibrate && navigator.vibrate([400, 100, 400]); } catch {} }
+      if (e && s >= (e.alvo_s || 40) && !PL.cronoAvisou) { PL.cronoAvisou = true; bip(2); vibrar([400, 100, 400]); }
     }
   }
 }
@@ -332,6 +335,8 @@ function renderPlayer() {
   const log = PL.log;
   $("#pTitulo").textContent = log.titulo;
   const corpo = $("#pCorpo");
+  $("#pFeita").disabled = PL.tela === "editar";
+  if (PL.tela === "editar") { renderEditar(corpo); return; }
   if (PL.tela === "lista") { renderLista(corpo); return; }
   if (PL.tela === "fim") { renderFim(corpo); return; }
   if (typeof modoAuto === "function" && modoAuto()) { renderAuto(corpo); return; }
@@ -347,11 +352,12 @@ function renderPlayer() {
   h += '<table class="tabela num"><tr><th>Série</th><th>kg</th><th>' + (e.medida === "s" ? "seg" : "reps") + "</th><th>sobrou</th></tr>";
   for (let i = 0; i < total; i++) {
     const f = e.feitas[i];
-    if (f) h += '<tr class="feita"><td>' + (i + 1) + " ✓</td><td>" + (f.kg || 0) + "</td><td>" + (f.reps != null ? f.reps : f.s) + "</td><td>" + (f.rir != null ? f.rir : "—") + "</td></tr>";
+    if (f) h += '<tr class="feita" data-ed="' + i + '"><td>' + (i + 1) + " ✓</td><td>" + (f.kg || 0) + "</td><td>" + (f.reps != null ? f.reps : f.s) + "</td><td>" + (f.rir != null ? f.rir : "—") + " ✎</td></tr>";
     else if (i === n) h += '<tr class="atual"><td>' + (i + 1) + "</td><td>" + en.kg + "</td><td>" + (e.medida === "s" ? en.s : en.reps) + "</td><td>" + en.rir + "</td></tr>";
     else h += '<tr><td>' + (i + 1) + "</td><td>—</td><td>—</td><td>—</td></tr>";
   }
   h += "</table>";
+  if (n) h += '<div class="sub">Toque numa série feita (✎) para corrigir ou apagar.</div>';
   if (!c.corporal || en.kg) {
     h += '<div class="stepper"><button class="icon" data-kg="-1">−</button><div class="val"><button class="valbtn" id="inKg">' + String(en.kg).replace(".", ",") +
       '</button><span>kg · passo ' + String(c.inc || 1).replace(".", ",") + '</span></div><button class="icon" data-kg="1">+</button></div>';
@@ -384,6 +390,7 @@ function renderPlayer() {
   corpo.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => { en.s = Math.max(5, en.s + Number(b.dataset.s)); renderPlayer(); }; });
   corpo.querySelectorAll("[data-rir]").forEach((b) => { b.onclick = () => { en.rir = Number(b.dataset.rir); renderPlayer(); }; });
   ligarTeclados(corpo, e, en);
+  ligarEdicao(corpo, log.atual);
   const cb = $("#pCronoBtn");
   if (cb) cb.onclick = () => {
     if (PL.cronometro) { en.s = Math.floor((Date.now() - PL.cronometro) / 1000); PL.cronometro = 0; }
@@ -452,10 +459,13 @@ async function gravarSerie() {
   renderPlayer();
 }
 
+/* O descanso e uma faixa acima do rodape: a tabela e os valores da proxima
+ * serie ficam a vista e podem ser ajustados enquanto o tempo corre. Marcar a
+ * serie seguinte antes da hora recomeca a contagem. No fim: bipe e vibracao. */
 function iniciarDescanso(seg, texto) {
   PL.fimDescanso = Date.now() + seg * 1000;
   PL.acabou = false;
-  PL.avisou10 = false;
+  PL.avisou10 = seg <= 10;
   $("#dProx").innerHTML = texto;
   $("#descanso").classList.add("on");
   tickPlayer();
@@ -463,7 +473,92 @@ function iniciarDescanso(seg, texto) {
 function fimDescanso() {
   $("#descanso").classList.remove("on");
   PL.acabou = true;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Corrigir ou apagar uma serie ja registrada (qualquer uma, nao so a ultima) */
+/* ------------------------------------------------------------------------- */
+
+function corrigirSerie(log, iEx, iSerie, v) {
+  const e = log.exercicios[iEx], f = e && e.feitas[iSerie];
+  if (!f) return false;
+  f.kg = v.kg;
+  if (e.medida === "s") f.s = v.s; else f.reps = v.reps;
+  f.rir = v.rir;
+  f.auto = false;   // conferida a mao: deixa de ser serie presumida pelo modo automatico
+  return true;
+}
+function apagarSerie(log, iEx, iSerie) {
+  const e = log.exercicios[iEx];
+  if (!e || !e.feitas[iSerie]) return false;
+  e.feitas.splice(iSerie, 1);
+  return true;
+}
+
+function abrirEdicao(iEx, iSerie) {
+  const e = PL.log.exercicios[iEx], f = e && e.feitas[iSerie];
+  if (!f) return;
+  PL.edit = { ex: iEx, i: iSerie, volta: PL.tela === "lista" ? "lista" : "serie",
+    v: { kg: f.kg || 0, reps: f.reps != null ? f.reps : e.reps_max || 0, s: f.s != null ? f.s : e.alvo_s || 40, rir: f.rir != null ? f.rir : e.rir } };
+  PL.tela = "editar";
   renderPlayer();
+}
+function fecharEdicao(mudou) {
+  const ed = PL.edit;
+  PL.tela = (ed && ed.volta) || "serie";
+  if (mudou && ed && ed.ex === PL.log.atual) PL.entrada = null;   // a proxima serie parte de novo da ultima feita
+  PL.edit = null;
+  PL.toqueSerie = Date.now();   // toque repetido em Salvar nao vira serie nova
+  renderPlayer();
+}
+function ligarEdicao(corpo, iEx) {
+  corpo.querySelectorAll("[data-ed]").forEach((el) => {
+    el.onclick = (ev) => {
+      const botao = ev.target.closest("button");
+      if (botao && botao !== el) return;   // botao dentro da linha tem a propria acao
+      ev.stopPropagation();
+      abrirEdicao(el.dataset.edEx != null ? Number(el.dataset.edEx) : iEx, Number(el.dataset.ed));
+    };
+  });
+}
+
+function renderEditar(corpo) {
+  const log = PL.log, ed = PL.edit, e = ed && log.exercicios[ed.ex];
+  if (!e || !e.feitas[ed.i]) { PL.edit = null; PL.tela = "serie"; renderPlayer(); return; }
+  const c = catEx(e.chave), v = ed.v, inc = c.inc || 1;
+  let h = '<div class="sub">Corrigir série ' + (ed.i + 1) + " de " + e.feitas.length + ' já feitas</div><div class="exnome">' + esc(e.nome) + "</div>" +
+    '<div class="stepper"><button class="icon" data-kg="-1" aria-label="Menos carga">−</button><div class="val"><button class="valbtn" id="inKg">' + String(v.kg).replace(".", ",") +
+    '</button><span>kg · passo ' + String(inc).replace(".", ",") + '</span></div><button class="icon" data-kg="1" aria-label="Mais carga">+</button></div>';
+  if (e.medida === "s") {
+    h += '<div class="stepper"><button class="icon" data-s="-5" aria-label="Menos 5 segundos">−</button><div class="val"><b class="num">' + v.s + '</b><span>segundos</span></div><button class="icon" data-s="5" aria-label="Mais 5 segundos">+</button></div>';
+  } else {
+    h += '<div class="stepper"><button class="icon" data-reps="-1" aria-label="Menos uma repetição">−</button><div class="val"><button class="valbtn" id="inReps">' + v.reps +
+      '</button><span>repetições</span></div><button class="icon" data-reps="1" aria-label="Mais uma repetição">+</button></div>';
+  }
+  h += '<div class="sub" style="text-align:center">Quantas repetições ainda sobravam?</div><div class="rir">' +
+    [0, 1, 2, 3, 4].map((x) => '<button class="' + (v.rir === x ? "on" : "") + '" data-rir="' + x + '">' + (x === 4 ? "4+" : x) + "</button>").join("") + "</div>" +
+    '<div class="acoes"><button class="btn" id="eCancelar">Cancelar</button><button class="btn main" id="eSalvar">Salvar correção</button></div>' +
+    '<button class="btn ghost" style="width:100%;margin-top:14px;color:var(--bad)" id="eApagar">Apagar esta série</button>';
+  corpo.innerHTML = h;
+  corpo.querySelectorAll("[data-kg]").forEach((b) => { b.onclick = () => { v.kg = Math.max(0, Math.round((v.kg + Number(b.dataset.kg) * inc) * 100) / 100); renderPlayer(); }; });
+  corpo.querySelectorAll("[data-reps]").forEach((b) => { b.onclick = () => { v.reps = Math.max(0, v.reps + Number(b.dataset.reps)); renderPlayer(); }; });
+  corpo.querySelectorAll("[data-s]").forEach((b) => { b.onclick = () => { v.s = Math.max(5, v.s + Number(b.dataset.s)); renderPlayer(); }; });
+  corpo.querySelectorAll("[data-rir]").forEach((b) => { b.onclick = () => { v.rir = Number(b.dataset.rir); renderPlayer(); }; });
+  ligarTeclados(corpo, e, v);
+  $("#eCancelar").onclick = () => fecharEdicao(false);
+  $("#eSalvar").onclick = async () => {
+    corrigirSerie(log, ed.ex, ed.i, v);
+    await idb.put("forca", log);
+    toast("Série " + (ed.i + 1) + " corrigida: " + String(v.kg).replace(".", ",") + " kg × " + (e.medida === "s" ? v.s + " s" : v.reps));
+    fecharEdicao(true);
+  };
+  $("#eApagar").onclick = async () => {
+    if (!confirm("Apagar a série " + (ed.i + 1) + " de " + e.nome + "?")) return;
+    apagarSerie(log, ed.ex, ed.i);
+    await idb.put("forca", log);
+    toast("Série apagada");
+    fecharEdicao(true);
+  };
 }
 
 function trocarExercicio() {
@@ -494,10 +589,15 @@ function trocarExercicio() {
 function renderLista(corpo) {
   const log = PL.log;
   corpo.innerHTML = '<div class="exnome" style="font-size:20px">Exercícios</div><div class="card">' + log.exercicios.map((e, i) =>
-    '<div class="ex" data-ir="' + i + '"><b>' + (i === log.atual ? "▶ " : "") + esc(e.nome) + '</b><span class="kg num">' + e.feitas.length + "/" + e.series + "</span><small>" +
-    (e.feitas.length ? e.feitas.map((f) => (f.kg || 0) + "×" + (f.reps != null ? f.reps : f.s + "s")).join(" · ") : (e.kg ? e.kg + " kg sugerido" : "")) + "</small></div>").join("") + "</div>" +
+    '<div class="ex" data-ir="' + i + '"><b>' + (i === log.atual ? "▶ " : "") + esc(e.nome) + '</b><span class="kg num">' + e.feitas.length + "/" + e.series + "</span>" +
+    (e.feitas.length
+      ? '<div class="chips wrap" style="grid-column:1/-1">' + e.feitas.map((f, j) => '<button class="chip num" data-ed-ex="' + i + '" data-ed="' + j + '" aria-label="Corrigir série ' + (j + 1) + '">' +
+        (f.kg || 0) + "×" + (f.reps != null ? f.reps : f.s + "s") + " ✎</button>").join("") + "</div>"
+      : "<small>" + (e.kg ? e.kg + " kg sugerido" : "") + "</small>") + "</div>").join("") + "</div>" +
+    '<div class="sub">Toque numa série (✎) para corrigir ou apagar; no nome, para ir ao exercício.</div>' +
     '<div class="acoes"><button class="btn" id="pAdd">+ Exercício</button><button class="btn ok" id="pEncerrar">Encerrar treino</button></div>';
   corpo.querySelectorAll("[data-ir]").forEach((d) => { d.onclick = () => irPara(Number(d.dataset.ir)); });
+  ligarEdicao(corpo, log.atual);
   $("#pEncerrar").onclick = () => { PL.tela = "fim"; renderPlayer(); };
   $("#pAdd").onclick = () => {
     const cat = (S.pac && S.pac.catalogo_forca) || {};

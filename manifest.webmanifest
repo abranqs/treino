@@ -1,7 +1,7 @@
 {
   "name": "Treino — guia do dia",
   "short_name": "Treino",
-  "description": "Prontidão, treino do dia alterável e musculação com cargas, ligado ao relógio Garmin pelo treino-ia.",
+  "description": "Prontidão, treino do dia alterável e musculação com cargas, ligado ao relógio Amazfit pelo treino-ia.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
