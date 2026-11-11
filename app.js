@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.0";
+const VERSAO = "1.2.1";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -517,6 +517,7 @@ function renderHoje() {
   const dia = diasVisiveis().find((d) => d.data === h) || { data: h, sessoes: [] };
   let html = htmlTopo(nomeDia(h), esc(quandoRecebido()) + (p.prova && p.prova.dias != null && p.prova.dias >= 0 ? " · " + esc(p.prova.nome) + " em " + p.prova.dias + " dias" : ""));
   html += avisosGerais();
+  html += htmlMetaSemana(p.meta_semana, false);
   if (p.hoje === h) html += htmlProntidao(p);
   html += "<h2>Treino de hoje</h2>";
   if (!dia.sessoes.length) html += '<div class="card vazio">Sem treino planejado hoje.</div>';
@@ -630,6 +631,34 @@ function htmlSemanaDias(sem) {
   return h + '<div class="sub" style="margin-top:8px">Coluna cinza: planejado. Coluna verde: feito. Em minutos.</div></div>';
 }
 
+/* A meta da semana (aeróbico acima da Z1 e musculação), a primeira meta do
+ * sistema. A conta é do computador (treino/meta_semana.py); aqui só desenha. */
+function htmlMetaSemana(m, comHistorico) {
+  if (!m || !m.aerobico || !m.forca) return "";
+  const a = m.aerobico, f = m.forca;
+  const cls = { verde: "ok", amarelo: "warn", vermelho: "bad" };
+  const barra = (v, alvo, cor) => '<div class="barra" style="margin:6px 0"><span style="width:' +
+    Math.min(100, Math.round(100 * v / Math.max(1, alvo))) + '%;background:' + cor + '"></span></div>';
+  const rot = { corrida: "corrida", bike: "bike", natacao: "natação", outros: "outros" };
+  const mods = Object.keys(a.por_modalidade || {}).filter((k) => a.por_modalidade[k] > 0)
+    .map((k) => rot[k] + " " + a.por_modalidade[k]).join(" · ");
+  let h = "<h2>Meta da semana</h2><div class=\"card\">";
+  h += '<div class="sub" style="margin-bottom:8px">' + esc(m.texto || "") + "</div>";
+  h += '<div class="row"><b>Aeróbico acima da Z1</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
+    a.min + " de " + a.alvo + " min</span></div>" + barra(a.min, a.alvo, "var(--acc)");
+  h += '<div class="sub">' + (a.min ? a.moderado + " min em Z2–Z3 + " + a.vigoroso + " em Z4–Z5 (valem 2)" + (mods ? " · " + esc(mods) : "") : "Nada acima da Z1 ainda.") + "</div>";
+  h += '<div class="row" style="margin-top:12px"><b>Musculação</b><span class="sp"></span><span class="badge ' + (cls[f.cor] || "") + ' num">' +
+    f.min + " de " + f.alvo_min + " min · " + f.sessoes + " de " + f.alvo_sessoes + " sessões</span></div>" + barra(f.min, f.alvo_min, "var(--forca)");
+  h += '<div class="sub">Só contam sessões de 30 min ou mais; a meta fecha com 2 sessões.</div>';
+  if (comHistorico && Array.isArray(m.historico) && m.historico.length) {
+    h += '<div class="sub" style="margin-top:12px"><b>Semanas anteriores</b> (aeróbico · musculação)</div>';
+    h += m.historico.map((s) => '<div class="row num" style="padding:4px 0;border-bottom:1px solid var(--linha,#8883)"><span>' +
+      esc(String(s.de).slice(8, 10) + "/" + String(s.de).slice(5, 7)) + '</span><span class="sp"></span><span>' + s.aerobico + " · " +
+      s.forca + " min (" + s.forca_sessoes + ")</span>" + (s.ok ? ' <span class="badge ok">✓</span>' : "") + "</div>").join("");
+  }
+  return h + "</div>";
+}
+
 function statusSessao(s) {
   if (s.local) {
     if (s.local.enviada_em) return '<span class="badge info">enviada · o computador manda ao relógio</span>';
@@ -687,6 +716,7 @@ function renderSemana() {
   const sem = S.pac.semana || null;
   let html = htmlTopo("Semana", esc(quandoRecebido()));
   html += avisosGerais();
+  html += htmlMetaSemana(S.pac.meta_semana, true);
   html += htmlSemanaDias(sem);
   if (sem && sem.modalidades) html += htmlSemanaResumo(sem);
   html += "<h2>Sessões</h2>";
