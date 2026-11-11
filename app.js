@@ -138,9 +138,20 @@ async function buscar(silencioso) {
  * Ate la ela e mostrada por cima do que veio publicado. */
 async function limparAplicados() {
   if (!S.pac) return;
-  const aplicadas = new Set((S.pac.trocas_aplicadas || []).map((t) => t.id));
+  const aplicadas = new Map((S.pac.trocas_aplicadas || []).map((t) => [t.id, t]));
   for (const t of S.trocas.slice()) {
-    if (aplicadas.has(t.id)) { await idb.del("trocas", t.id); S.trocas = S.trocas.filter((x) => x.id !== t.id); }
+    const a = aplicadas.get(t.id);
+    if (!a) continue;
+    // so sai do celular a troca que o computador aplicou de fato (resultado ok)
+    if (a.aplicado_em || (a.resultado && a.resultado.ok)) { await idb.del("trocas", t.id); S.trocas = S.trocas.filter((x) => x.id !== t.id); continue; }
+    // recusada: fica pendente, com aviso na tela, e volta para a fila na proxima abertura (iniciar)
+    if (S.fila.some((f) => f.id === t.id)) continue;
+    // reenviada ha pouco: o resultado publicado ainda pode ser o da tentativa anterior
+    if (t.falha && t.enviada_em && Date.now() - new Date(t.enviada_em).getTime() < 10 * 60000) continue;
+    if (!t.falha) toast("Uma alteração não foi aplicada no computador — continua pendente aqui.", 5000);
+    t.falha = String((a.resultado && a.resultado.erro) || "sem motivo informado").slice(0, 120);
+    t.enviada_em = null;
+    await idb.put("trocas", t);
   }
   const recebidos = new Set(S.pac.forca_recebidos || []);
   for (const f of S.forca) {
@@ -338,6 +349,12 @@ function quandoRecebido() {
 function avisosGerais() {
   let h = "";
   if (S.erroFila && S.fila.length) h += '<div class="aviso veto">' + esc(S.erroFila) + '<div class="acoes"><button class="btn small" id="tentarFila">Tentar enviar de novo</button> <button class="btn small ghost" id="descartarFila">Descartar alterações</button></div></div>';
+  for (const t of S.trocas) {
+    if (!t.falha || t.data < hojeLocal()) continue;
+    h += '<div class="aviso veto">A alteração de ' + esc(nomeDia(t.data, true)) + " não foi aplicada no computador (" + esc(t.falha) + "). " +
+      (t.enviada_em ? "Foi reenviada; aguardando o computador." :
+        'Continua pendente e é reenviada na próxima abertura. <button class="btn small ghost" data-desfazer="' + esc(t.id) + '">Desfazer alteração</button>') + "</div>";
+  }
   if (S.erroSync) h += '<div class="aviso">Última atualização falhou: ' + esc(S.erroSync) + "</div>";
   if (S.pac && S.pac.hoje !== hojeLocal()) {
     h += '<div class="aviso">Os dados são de ' + esc(nomeDia(S.pac.hoje)) + ": o computador ainda não publicou hoje. Prontidão e noite ficam para quando ele ligar; o plano do dia já está aqui.</div>";
@@ -417,7 +434,7 @@ function htmlSemanaResumo(sem) {
 function statusSessao(s) {
   if (s.local) {
     if (s.local.enviada_em) return '<span class="badge info">enviada · o computador manda ao relógio</span>';
-    return '<span class="badge warn">na fila do celular</span> <button class="btn small ghost" data-desfazer="' + esc(s.local.id) + '">Desfazer alteração</button>';
+    return '<span class="badge warn">' + (s.local.falha ? "não aplicada · pendente" : "na fila do celular") + '</span> <button class="btn small ghost" data-desfazer="' + esc(s.local.id) + '">Desfazer alteração</button>';
   }
   if (s.status === "feito") return '<span class="badge ok">feito ✓</span>';
   if (s.status === "perdido") return '<span class="badge bad">perdido</span>';
@@ -777,6 +794,15 @@ async function iniciar() {
   S.fila = await idb.all("fila");
   S.trocas = await idb.all("trocas");
   S.forca = await idb.all("forca");
+  // troca que o computador recusou (limparAplicados): volta para a fila uma vez a cada abertura
+  for (const t of S.trocas) {
+    if (!t.falha || S.fila.some((f) => f.id === t.id)) continue;
+    const corpo = Object.assign({}, t);
+    delete corpo.falha; delete corpo.enviada_em;
+    const item = { id: t.id, titulo: "treino-app troca " + t.data, corpo, criado_em: agoraIso(), tentativas: 0 };
+    S.fila.push(item);
+    await idb.put("fila", item);
+  }
   document.querySelectorAll("#abas button").forEach((b) => { b.onclick = () => { S.aba = b.dataset.aba; render(); window.scrollTo(0, 0); }; });
   $("#folhaFechar").onclick = () => fecharFolha();
   window.addEventListener("popstate", () => { fecharFolha(true); if (typeof fecharPlayerPeloVoltar === "function") fecharPlayerPeloVoltar(); });

@@ -6,13 +6,15 @@
  * carga e as repeticoes que estao na tela. Mexe-se so quando algo sai
  * diferente. Entre um exercicio e outro ha uma troca de 60 s.
  *
- * O estado e marcado por horario (inicio da fase), nao por contador: com a
- * tela apagada ou o app fechado, ao voltar ele recupera as series que
- * passaram.
+ * O estado e marcado por horario (inicio da fase), nao por contador. Serie so
+ * e registrada com o app aberto e na tela: se ele ficou fora (aba oculta, app
+ * fechado, relogio pulou), volta PAUSADO na fase em que estava e espera um
+ * toque em Continuar. Nada de registrar em lote o que "venceu" na ausencia.
  */
 "use strict";
 
 const TROCA_S = 60;
+const LACUNA_MS = 10000;   // mais que isso sem o app rodar = ausencia: pausa em vez de registrar
 const PRESETS_CICLO = [60, 80, 90, 120, 150, 180];
 
 function ciclosPreferidos() { try { return JSON.parse(localStorage.getItem("treino_ciclo") || "{}"); } catch { return {}; } }
@@ -77,6 +79,7 @@ function iniciarAuto() {
   a.fase = "serie";
   a.faseInicio = Date.now();
   a.pausadoEm = null;
+  a.lacuna = false;
   PL.avisoFase = null;
   idb.put("forca", PL.log);
   anunciarSerie();
@@ -86,7 +89,7 @@ function iniciarAuto() {
 function pausarAuto() {
   const a = estadoAuto();
   if (!a.iniciado) { iniciarAuto(); return; }
-  if (a.pausadoEm) { a.faseInicio += Date.now() - a.pausadoEm; a.pausadoEm = null; bip(1); }
+  if (a.pausadoEm) { a.faseInicio += Date.now() - a.pausadoEm; a.pausadoEm = null; a.lacuna = false; bip(1); }
   else a.pausadoEm = Date.now();
   idb.put("forca", PL.log);
   renderPlayer();
@@ -100,6 +103,7 @@ function autoIrPara(i) {
   const a = estadoAuto();
   a.fase = "troca";
   a.faseInicio = Date.now();
+  if (a.pausadoEm) a.pausadoEm = a.faseInicio;   // pausado: a troca comeca inteira ao continuar
   if (!a.iniciado) { a.iniciado = true; a.pausadoEm = Date.now(); }
   idb.put("forca", log);
   renderPlayer();
@@ -113,13 +117,49 @@ function registrarSerieAuto() {
   e.feitas.push({ kg: en.kg, reps: e.medida === "s" ? null : en.reps, s: e.medida === "s" ? en.s : null, rir: en.rir, t: agoraIso(), auto: true });
 }
 
-/* Avanca as fases que ja passaram. Devolve true se algo mudou. */
+/* O app ficou sem rodar (aba oculta, app fechado, relogio pulou)? Entao nada
+ * do que "venceu" nesse tempo vira serie: pausa na fase em que estava, no
+ * instante em que o app foi visto pela ultima vez, e espera o toque em
+ * Continuar. Devolve true se pausou. */
+function lacunaAuto() {
+  const a = estadoAuto();
+  const agora = Date.now(), visto = a.vistoEm || 0;
+  a.vistoEm = agora;
+  if (!a.iniciado || a.pausadoEm || PL.tela === "fim") return false;
+  const venceu = a.faseInicio + duracaoFase(a) * 1000;
+  if (!(visto && Math.abs(agora - visto) > LACUNA_MS) && agora - venceu <= LACUNA_MS) return false;
+  // sem saber quando saiu (visto = 0), a fase recomeca do zero ao continuar
+  a.pausadoEm = Math.max(a.faseInicio, Math.min(visto || a.faseInicio, venceu));
+  a.lacuna = true;
+  idb.put("forca", PL.log);
+  return true;
+}
+
+/* Fechou o player: o automatico para junto, ate o toque em Continuar. */
+function pausarAoSair() {
+  const log = PL.log, a = log && log.auto;
+  if (!a || !a.iniciado || a.pausadoEm) return;
+  if (log.status !== "andamento" || !S.forca.some((f) => f.id === log.id)) return;   // salvo ou descartado: nao regrava
+  a.pausadoEm = Date.now();
+  idb.put("forca", log);
+}
+
+/* Saiu da tela ou a pagina esta fechando: guarda a hora em que o app foi
+ * visto pela ultima vez (vistoEm, do ultimo tick); na volta, lacunaAuto decide. */
+function guardarSaidaAuto() {
+  const a = PL.aberto && PL.log && PL.log.auto;
+  if (a && a.iniciado && !a.pausadoEm) idb.put("forca", PL.log);
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") guardarSaidaAuto(); });
+window.addEventListener("pagehide", guardarSaidaAuto);
+
+/* Avanca a fase que acabou de vencer (uma por vez, nunca em lote). Devolve true se algo mudou. */
 function avancarAuto() {
   const log = PL.log;
   const a = estadoAuto();
   if (!a.iniciado || a.pausadoEm || PL.tela === "fim") return false;
   let mudou = false;
-  for (let guarda = 0; guarda < 200; guarda++) {
+  for (let guarda = 0; guarda < 1; guarda++) {
     const dur = duracaoFase(a) * 1000;
     if (Date.now() - a.faseInicio < dur) break;
     a.faseInicio += dur;
@@ -148,8 +188,10 @@ function avancarAuto() {
 }
 
 function tickAuto() {
-  if (!PL.log || PL.tela === "lista") return;
-  if (avancarAuto()) { renderPlayer(); return; }
+  if (!PL.log || document.hidden) return;          // fora da tela nao conta nem registra
+  const pausou = lacunaAuto();
+  if (PL.tela === "lista") return;
+  if (pausou || avancarAuto()) { renderPlayer(); return; }
   const a = estadoAuto();
   if (!a.iniciado || PL.tela === "fim") return;
   const dur = duracaoFase(a);
@@ -180,7 +222,7 @@ function renderAuto(corpo) {
 
   let rotulo;
   if (!a.iniciado) rotulo = "PRONTO";
-  else if (a.pausadoEm) rotulo = "PAUSADO";
+  else if (a.pausadoEm) rotulo = a.lacuna ? "PAUSADO · TOQUE EM CONTINUAR" : "PAUSADO";
   else if (a.fase === "troca") rotulo = "TROCA DE EXERCÍCIO";
   else rotulo = "SÉRIE " + Math.min(n + 1, e.series) + " DE " + e.series;
   const dur = a.iniciado ? duracaoFase(a) : ciclo;
@@ -188,7 +230,8 @@ function renderAuto(corpo) {
   h += '<div class="card" style="text-align:center;margin-top:10px"><div class="sub" style="font-weight:800;letter-spacing:.1em">' + rotulo + "</div>" +
     '<div class="num" id="aRelogio" style="font-size:84px;font-weight:800;line-height:1.05">' + fmtSeg(Math.max(0, Math.ceil(dur - passou))) + "</div>" +
     '<div class="barra"><span id="aBarra" style="width:' + Math.min(100, 100 * passou / dur) + '%;background:var(--forca)"></span></div>' +
-    '<div class="sub">' + (a.fase === "troca" && a.iniciado ? "Prepare o próximo exercício. A primeira série começa no bipe." :
+    '<div class="sub">' + (a.pausadoEm && a.lacuna ? "O app ficou fora da tela e parou aqui: nada foi registrado nesse tempo. Toque em Continuar." :
+      a.fase === "troca" && a.iniciado ? "Prepare o próximo exercício. A primeira série começa no bipe." :
       "Faça a série e descanse até o bipe. A série é registrada sozinha com os valores abaixo.") + "</div></div>";
 
   // o que vai ser registrado

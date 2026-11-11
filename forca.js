@@ -252,6 +252,7 @@ function abrirPlayer(log) {
 }
 
 function fecharPlayer() {
+  if (typeof pausarAoSair === "function") pausarAoSair();
   PL.aberto = false;
   $("#player").classList.remove("on");
   $("#descanso").classList.remove("on");
@@ -264,6 +265,7 @@ function fecharPlayer() {
 function fecharPlayerPeloVoltar() {
   if (!PL.aberto) return;
   if ($("#descanso").classList.contains("on")) { fimDescanso(true); history.pushState({ player: 1 }, ""); return; }
+  if (typeof pausarAoSair === "function") pausarAoSair();
   PL.aberto = false;
   $("#player").classList.remove("on");
   clearInterval(PL.tick);
@@ -402,7 +404,16 @@ function renderPlayer() {
   const bd = $("#pDesfazer"); if (bd) bd.onclick = () => { e.feitas.pop(); PL.entrada = null; idb.put("forca", log); renderPlayer(); };
 }
 
+/* Toque repetido no botao nao vira duas series: ignora novo toque por 700 ms
+ * e enquanto a primeira ainda esta sendo gravada. */
 async function serieFeita() {
+  if (PL.gravando || Date.now() - (PL.toqueSerie || 0) < 700) return;
+  PL.toqueSerie = Date.now();
+  PL.gravando = true;
+  try { await gravarSerie(); } finally { PL.gravando = false; PL.toqueSerie = Date.now(); }
+}
+
+async function gravarSerie() {
   if (PL.tela !== "serie") { PL.tela = "serie"; renderPlayer(); return; }
   const log = PL.log, e = exAtual(), en = PL.entrada || entradaPadrao(e), c = catEx(e.chave);
   if (PL.cronometro) { en.s = Math.floor((Date.now() - PL.cronometro) / 1000); PL.cronometro = 0; }
@@ -565,6 +576,7 @@ function htmlSensacao(feitas) {
 }
 
 async function salvarForca() {
+  if (Date.now() - (PL.toqueSerie || 0) < 700) return;   // segundo toque da ultima serie nao salva o treino sem querer
   const log = PL.log;
   const feitas = log.exercicios.filter((e) => e.feitas.length);
   if (!feitas.length) {
