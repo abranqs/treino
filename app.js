@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.1";
+const VERSAO = "1.2.2";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -651,10 +651,27 @@ function htmlMetaSemana(m, comHistorico) {
     f.min + " de " + f.alvo_min + " min · " + f.sessoes + " de " + f.alvo_sessoes + " sessões</span></div>" + barra(f.min, f.alvo_min, "var(--forca)");
   h += '<div class="sub">Só contam sessões de 30 min ou mais; a meta fecha com 2 sessões.</div>';
   if (comHistorico && Array.isArray(m.historico) && m.historico.length) {
-    h += '<div class="sub" style="margin-top:12px"><b>Semanas anteriores</b> (aeróbico · musculação)</div>';
-    h += m.historico.map((s) => '<div class="row num" style="padding:4px 0;border-bottom:1px solid var(--linha,#8883)"><span>' +
-      esc(String(s.de).slice(8, 10) + "/" + String(s.de).slice(5, 7)) + '</span><span class="sp"></span><span>' + s.aerobico + " · " +
-      s.forca + " min (" + s.forca_sessoes + ")</span>" + (s.ok ? ' <span class="badge ok">✓</span>' : "") + "</div>").join("");
+    // Semanas anteriores mais a atual, por modalidade: corrida, bike, natação e outros
+    // somam o aeróbico (Z4–Z5 em dobro); força em minutos de sessões de 30+ min.
+    const cores = { corrida: "var(--corrida)", bike: "var(--bike)", natacao: "var(--natacao)", outros: "var(--descanso)" };
+    const semanas = m.historico.concat([{ de: m.de, aerobico: a.min, forca: f.min, forca_sessoes: f.sessoes,
+      ok: a.ok && f.ok, por_modalidade: a.por_modalidade, atual: true }]);
+    const teto = Math.max(a.alvo, ...semanas.map((s) => s.aerobico || 0));
+    h += '<div class="sub" style="margin-top:14px"><b>Semanas</b> · aeróbico por modalidade e musculação</div>';
+    h += '<div class="row sub" style="gap:10px;flex-wrap:wrap;margin:4px 0">' + Object.keys(cores).map((k) =>
+      '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + cores[k] + '"></span> ' + rot[k] + "</span>").join("") + "</div>";
+    h += semanas.map((s) => {
+      const pm = s.por_modalidade || {};
+      const seg = Object.keys(cores).filter((k) => pm[k] > 0).map((k) => '<span title="' + rot[k] + '" style="width:' +
+        (100 * pm[k] / teto) + "%;background:" + cores[k] + '"></span>').join("");
+      const det = Object.keys(cores).filter((k) => pm[k] > 0).map((k) => rot[k] + " " + pm[k]).join(" · ");
+      return '<div style="padding:6px 0;border-bottom:1px solid var(--linha,#8883)">' +
+        '<div class="row num"><b>' + esc(String(s.de).slice(8, 10) + "/" + String(s.de).slice(5, 7)) + (s.atual ? " (atual)" : "") +
+        '</b><span class="sp"></span><span>' + s.aerobico + " min · força " + s.forca + " (" + s.forca_sessoes + ")</span>" +
+        (s.ok ? ' <span class="badge ok">✓</span>' : "") + "</div>" +
+        '<div class="barra" style="margin:4px 0">' + seg + "</div>" +
+        '<div class="sub num">' + (det || "sem aeróbico") + "</div></div>";
+    }).join("");
   }
   return h + "</div>";
 }
