@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.3";
+const VERSAO = "1.2.4";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -652,7 +652,8 @@ function htmlMetaSemana(m, comHistorico) {
     ". Peso por zona: Z1 0,5 · Z2 1 · Z3 1,5 · Z4–Z5 2." : "Nenhum aeróbico ainda.") + "</div>";
   h += '<div class="row" style="margin-top:12px"><b>Musculação</b><span class="sp"></span><span class="badge ' + (cls[f.cor] || "") + ' num">' +
     f.min + " de " + f.alvo_min + " min · " + f.sessoes + " de " + f.alvo_sessoes + " sessões</span></div>" + barra(f.min, f.alvo_min, "var(--forca)");
-  h += '<div class="sub">' + (f.min_relogio != null ? f.min_relogio + " min no relógio, ponderados pela FC média (sessão densa vale mais). " : "") +
+  h += '<div class="sub">' + (f.min_relogio != null ? f.min_relogio + " min no relógio" + (f.reps ? ", " + f.reps + " repetições" : "") +
+    ", ponderados pela FC média e pelas repetições por minuto (sessão densa vale mais). " : "") +
     "Só contam sessões de 30 min ou mais; a meta fecha com 2 sessões.</div>";
   if (comHistorico && Array.isArray(m.historico) && m.historico.length) {
     // Semanas anteriores mais a atual, por modalidade: corrida, bike, natação e outros
