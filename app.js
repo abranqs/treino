@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.2";
+const VERSAO = "1.2.3";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -631,7 +631,7 @@ function htmlSemanaDias(sem) {
   return h + '<div class="sub" style="margin-top:8px">Coluna cinza: planejado. Coluna verde: feito. Em minutos.</div></div>';
 }
 
-/* A meta da semana (aeróbico acima da Z1 e musculação), a primeira meta do
+/* A meta da semana (aeróbico ponderado por zona e musculação), a primeira meta do
  * sistema. A conta é do computador (treino/meta_semana.py); aqui só desenha. */
 function htmlMetaSemana(m, comHistorico) {
   if (!m || !m.aerobico || !m.forca) return "";
@@ -644,15 +644,19 @@ function htmlMetaSemana(m, comHistorico) {
     .map((k) => rot[k] + " " + a.por_modalidade[k]).join(" · ");
   let h = "<h2>Meta da semana</h2><div class=\"card\">";
   h += '<div class="sub" style="margin-bottom:8px">' + esc(m.texto || "") + "</div>";
-  h += '<div class="row"><b>Aeróbico acima da Z1</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
+  h += '<div class="row"><b>Aeróbico</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
     a.min + " de " + a.alvo + " min</span></div>" + barra(a.min, a.alvo, "var(--acc)");
-  h += '<div class="sub">' + (a.min ? a.moderado + " min em Z2–Z3 + " + a.vigoroso + " em Z4–Z5 (valem 2)" + (mods ? " · " + esc(mods) : "") : "Nada acima da Z1 ainda.") + "</div>";
+  const zonas = a.leve != null ? "Z1 " + a.leve + " + Z2–Z3 " + a.moderado + " + Z4–Z5 " + a.vigoroso
+    : a.moderado + " min em Z2–Z3 + " + a.vigoroso + " em Z4–Z5";
+  h += '<div class="sub">' + (a.min ? "Ponderado: " + zonas + (mods ? " · " + esc(mods) : "") +
+    ". Peso por zona: Z1 0,5 · Z2 1 · Z3 1,5 · Z4–Z5 2." : "Nenhum aeróbico ainda.") + "</div>";
   h += '<div class="row" style="margin-top:12px"><b>Musculação</b><span class="sp"></span><span class="badge ' + (cls[f.cor] || "") + ' num">' +
     f.min + " de " + f.alvo_min + " min · " + f.sessoes + " de " + f.alvo_sessoes + " sessões</span></div>" + barra(f.min, f.alvo_min, "var(--forca)");
-  h += '<div class="sub">Só contam sessões de 30 min ou mais; a meta fecha com 2 sessões.</div>';
+  h += '<div class="sub">' + (f.min_relogio != null ? f.min_relogio + " min no relógio, ponderados pela FC média (sessão densa vale mais). " : "") +
+    "Só contam sessões de 30 min ou mais; a meta fecha com 2 sessões.</div>";
   if (comHistorico && Array.isArray(m.historico) && m.historico.length) {
     // Semanas anteriores mais a atual, por modalidade: corrida, bike, natação e outros
-    // somam o aeróbico (Z4–Z5 em dobro); força em minutos de sessões de 30+ min.
+    // somam o aeróbico (ponderado por zona); força em minutos ponderados pela FC.
     const cores = { corrida: "var(--corrida)", bike: "var(--bike)", natacao: "var(--natacao)", outros: "var(--descanso)" };
     const semanas = m.historico.concat([{ de: m.de, aerobico: a.min, forca: f.min, forca_sessoes: f.sessoes,
       ok: a.ok && f.ok, por_modalidade: a.por_modalidade, atual: true }]);
