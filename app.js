@@ -657,15 +657,20 @@ function htmlMetaSemana(m, comHistorico) {
   if (sm) {
     h += '<div class="row"><b>Total</b><span class="sp"></span><span class="badge ' + (sm.total_ok ? "ok" : "warn") + ' num">' +
       sm.total_min + " de " + sm.alvo_total + " min</span></div>" + barra(sm.total_min, sm.alvo_total, "var(--acc)");
+    if (sm.alvo_faceis != null) {
+      h += '<div class="row" style="margin-top:6px"><b>Fáceis (Z1–Z2)</b><span class="sp"></span><span class="badge ' + (sm.faceis_ok ? "ok" : "warn") + ' num">' +
+        sm.faceis_min + " de " + sm.alvo_faceis + " min</span></div>" + barra(sm.faceis_min, sm.alvo_faceis, "var(--acc)");
+      h += '<div class="row" style="margin-top:6px"><b>Limiar</b><span class="sp"></span><span class="badge ' + (sm.limiar_ok ? "ok" : "") + ' num">' +
+        sm.limiar_min + " min · meta " + sm.alvo_limiar + " a 32, teto " + sm.teto_limiar + "</span></div>";
+    }
     const kmTxt = String(sm.km_corrida).replace(".", ",");
     h += '<div class="row" style="margin-top:6px"><b>Corrida</b><span class="sp"></span><span class="badge ' + (cls[sm.km_cor] || "") + ' num">' +
       kmTxt + " de " + sm.alvo_km + " km</span></div>" + barra(sm.km_corrida, sm.alvo_km, "var(--corrida)");
-    h += '<div class="row sub" style="gap:12px;margin:6px 0 10px"><span class="badge ' + (sm.limiar_ok ? "ok" : "") + '">limiar ' +
-      sm.limiar_min + "/" + sm.alvo_limiar + " min</span><span class=\"badge " + (sm.longo_ok ? "ok" : "") + '">longo ' +
+    h += '<div class="row sub" style="gap:12px;margin:6px 0 10px"><span class="badge ' + (sm.longo_ok ? "ok" : "") + '">longo ' +
       (sm.longo_min ? sm.longo_min + " min" : "a fazer") + "</span></div>";
   }
-  h += '<div class="row"><b>Aeróbico</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
-    a.min + " de " + a.alvo + " min</span></div>" + barra(a.min, a.alvo, "var(--acc)");
+  h += '<div class="row" style="margin-top:12px"><b>Aeróbico ponderado</b> <span class="sub">(só referência)</span><span class="sp"></span><span class="badge num">' +
+    a.min + " pontos</span></div>";
   const zonas = a.leve != null ? "Z1 " + a.leve + " + Z2–Z3 " + a.moderado + " + Z4–Z5 " + a.vigoroso
     : a.moderado + " min em Z2–Z3 + " + a.vigoroso + " em Z4–Z5";
   h += '<div class="sub">' + (a.min ? "Ponderado: " + zonas + (mods ? " · " + esc(mods) : "") +
