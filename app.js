@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.4";
+const VERSAO = "1.2.5";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -642,8 +642,26 @@ function htmlMetaSemana(m, comHistorico) {
   const rot = { corrida: "corrida", bike: "bike", natacao: "natação", outros: "outros" };
   const mods = Object.keys(a.por_modalidade || {}).filter((k) => a.por_modalidade[k] > 0)
     .map((k) => rot[k] + " " + a.por_modalidade[k]).join(" · ");
-  let h = "<h2>Meta da semana</h2><div class=\"card\">";
+  let h = "";
+  // Meta do dia (90 min seg-sáb): o que faltar não vira dívida, só pesa na semana.
+  const hj = m.hoje;
+  if (hj && hj.meta_min) {
+    h += "<h2>Meta de hoje</h2><div class=\"card\">";
+    h += '<div class="row"><b>Treino</b><span class="sp"></span><span class="badge ' + (hj.ok ? "ok" : hj.feito_min ? "warn" : "") + ' num">' +
+      hj.feito_min + " de " + hj.meta_min + " min</span></div>" + barra(hj.feito_min, hj.meta_min, "var(--acc)");
+    h += '<div class="sub">' + (hj.ok ? "Dia fechado." : "Faltam " + hj.falta_min + " min. O que não der hoje fica só na conta da semana.") + "</div></div>";
+  }
+  h += "<h2>Meta da semana</h2><div class=\"card\">";
   h += '<div class="sub" style="margin-bottom:8px">' + esc(m.texto || "") + "</div>";
+  const sm = m.semana;
+  if (sm) {
+    const kmTxt = String(sm.km_corrida).replace(".", ",");
+    h += '<div class="row" style="margin-top:6px"><b>Corrida</b><span class="sp"></span><span class="badge ' + (cls[sm.km_cor] || "") + ' num">' +
+      kmTxt + " de " + sm.alvo_km + " km</span></div>" + barra(sm.km_corrida, sm.alvo_km, "var(--corrida)");
+    h += '<div class="row sub" style="gap:12px;margin:6px 0 10px"><span class="badge ' + (sm.limiar_ok ? "ok" : "") + '">limiar ' +
+      sm.limiar_min + "/" + sm.alvo_limiar + " min</span><span class=\"badge " + (sm.longo_ok ? "ok" : "") + '">longo ' +
+      (sm.longo_min ? sm.longo_min + " min" : "a fazer") + "</span></div>";
+  }
   h += '<div class="row"><b>Aeróbico</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
     a.min + " de " + a.alvo + " min</span></div>" + barra(a.min, a.alvo, "var(--acc)");
   const zonas = a.leve != null ? "Z1 " + a.leve + " + Z2–Z3 " + a.moderado + " + Z4–Z5 " + a.vigoroso
