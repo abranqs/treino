@@ -655,6 +655,8 @@ function htmlMetaSemana(m, comHistorico) {
   h += '<div class="sub" style="margin-bottom:8px">' + esc(m.texto || "") + "</div>";
   const sm = m.semana;
   if (sm) {
+    h += '<div class="row"><b>Total</b><span class="sp"></span><span class="badge ' + (sm.total_ok ? "ok" : "warn") + ' num">' +
+      sm.total_min + " de " + sm.alvo_total + " min</span></div>" + barra(sm.total_min, sm.alvo_total, "var(--acc)");
     const kmTxt = String(sm.km_corrida).replace(".", ",");
     h += '<div class="row" style="margin-top:6px"><b>Corrida</b><span class="sp"></span><span class="badge ' + (cls[sm.km_cor] || "") + ' num">' +
       kmTxt + " de " + sm.alvo_km + " km</span></div>" + barra(sm.km_corrida, sm.alvo_km, "var(--corrida)");
