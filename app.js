@@ -13,7 +13,7 @@
  */
 "use strict";
 
-const VERSAO = "1.2.5";
+const VERSAO = "1.2.6";
 const DEMO = new URLSearchParams(location.search).has("demo");
 const $ = (s, r) => (r || document).querySelector(s);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -656,12 +656,22 @@ function htmlMetaSemana(m, comHistorico) {
   const sm = m.semana;
   if (sm) {
     h += '<div class="row"><b>Total</b><span class="sp"></span><span class="badge ' + (sm.total_ok ? "ok" : "warn") + ' num">' +
-      sm.total_min + " de " + sm.alvo_total + " min</span></div>" + barra(sm.total_min, sm.alvo_total, "var(--acc)");
-    if (sm.alvo_faceis != null) {
-      h += '<div class="row" style="margin-top:6px"><b>Fáceis (Z1–Z2)</b><span class="sp"></span><span class="badge ' + (sm.faceis_ok ? "ok" : "warn") + ' num">' +
-        sm.faceis_min + " de " + sm.alvo_faceis + " min</span></div>" + barra(sm.faceis_min, sm.alvo_faceis, "var(--acc)");
-      h += '<div class="row" style="margin-top:6px"><b>Limiar</b><span class="sp"></span><span class="badge ' + (sm.limiar_ok ? "ok" : "") + ' num">' +
-        sm.limiar_min + " min · meta " + sm.alvo_limiar + " a 32, teto " + sm.teto_limiar + "</span></div>";
+      sm.total_min + (sm.piso_total ? " · faixa " + sm.piso_total + " a " + sm.teto_total + ", alvo " + sm.alvo_total : " de " + sm.alvo_total) + " min</span></div>" + barra(sm.total_min, sm.alvo_total, "var(--acc)");
+    if (Array.isArray(sm.zonas)) {
+      // Metas por zona (painel 16/11/2026): corrida e bike, cada uma nas próprias zonas.
+      h += '<div class="row" style="margin-top:6px"><b>Aeróbico</b><span class="sp"></span><span class="badge ' + (cls[a.cor] || "") + ' num">' +
+        a.min + " min · faixa " + a.piso + " a " + a.teto + ", alvo " + a.alvo + "</span></div>" + barra(a.min, a.alvo, "var(--acc)");
+      const nome = { 1: "Z1", 2: "Z2", 3: "Z3", 4: "Z4 (corrida)", 5: "Z5" };
+      sm.zonas.forEach((z) => {
+        const meta = z.zona === 1 ? "sem teto" : z.zona === 5 ? "zero até 11/01"
+          : (z.piso ? "mín " + z.piso + " · " : "") + "alvo " + z.alvo + (z.alvo_max > z.alvo ? "–" + z.alvo_max : "") + " · teto " + z.teto;
+        h += '<div class="row" style="margin-top:4px"><span>' + nome[z.zona] + '</span><span class="sp"></span><span class="badge ' + (cls[z.cor] || "") + ' num">' +
+          z.min + " min · " + meta + "</span></div>";
+      });
+      h += '<div class="row" style="margin-top:4px"><span>Z3 a Z5</span><span class="sp"></span><span class="badge ' + (sm.intenso_pct > sm.teto_intenso_pct ? "bad" : "ok") + ' num">' +
+        sm.intenso_pct + "% do aeróbico · teto " + sm.teto_intenso_pct + "%</span></div>";
+      if (sm.avisos && sm.avisos.length) h += '<div class="sub" style="margin-top:6px">Atenção: ' + esc(sm.avisos.join("; ")) + ".</div>";
+      if (sm.outros_min) h += '<div class="sub">Caminhada e outros: ' + sm.outros_min + " min (não contam no aeróbico).</div>";
     }
     const kmTxt = String(sm.km_corrida).replace(".", ",");
     h += '<div class="row" style="margin-top:6px"><b>Corrida</b><span class="sp"></span><span class="badge ' + (cls[sm.km_cor] || "") + ' num">' +
@@ -669,11 +679,11 @@ function htmlMetaSemana(m, comHistorico) {
     h += '<div class="row sub" style="gap:12px;margin:6px 0 10px"><span class="badge ' + (sm.longo_ok ? "ok" : "") + '">longo ' +
       (sm.longo_min ? sm.longo_min + " min" : "a fazer") + "</span></div>";
   }
-  h += '<div class="row" style="margin-top:12px"><b>Aeróbico ponderado</b> <span class="sub">(só referência)</span><span class="sp"></span><span class="badge num">' +
-    a.min + " pontos</span></div>";
+  h += '<div class="row" style="margin-top:12px"><b>Carga ponderada</b> <span class="sub">(só indicador)</span><span class="sp"></span><span class="badge num">' +
+    (a.ponderado != null ? a.ponderado : a.min) + " pontos</span></div>";
   const zonas = a.leve != null ? "Z1 " + a.leve + " + Z2–Z3 " + a.moderado + " + Z4–Z5 " + a.vigoroso
     : a.moderado + " min em Z2–Z3 + " + a.vigoroso + " em Z4–Z5";
-  h += '<div class="sub">' + (a.min ? "Ponderado: " + zonas + (mods ? " · " + esc(mods) : "") +
+  h += '<div class="sub">' + (a.min ? "Pontos: " + zonas + (mods ? " · " + esc(mods) : "") +
     ". Peso por zona: Z1 0,5 · Z2 1 · Z3 1,5 · Z4–Z5 2." : "Nenhum aeróbico ainda.") + "</div>";
   h += '<div class="row" style="margin-top:12px"><b>Musculação</b><span class="sp"></span><span class="badge ' + (cls[f.cor] || "") + ' num">' +
     f.min + " de " + f.alvo_min + " min · " + f.sessoes + " de " + f.alvo_sessoes + " sessões</span></div>" + barra(f.min, f.alvo_min, "var(--forca)");
